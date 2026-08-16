@@ -143,6 +143,9 @@ rule_prefix = RDPGuard Block
 profile = any
 ; จำกัดพอร์ตที่บล็อก (ว่าง = บล็อกทุกพอร์ตจาก IP นั้น) เช่น 3389,1433,22
 blocked_ports =
+; โหมด rule เดียวแบบ RDPGuard: rule เดียว (ชื่อ rule_prefix) แล้วเพิ่ม/ลบ IP
+; ในรายการ RemoteAddresses ตาม IP ที่โจมตี — false = สร้าง rule แยกต่อ IP
+single_rule = true
 
 [webui]
 ; Web UI เปิดที่พอร์ต/โฮสต์ไหน (ค่าเริ่มต้น: เฉพาะเครื่องนี้)

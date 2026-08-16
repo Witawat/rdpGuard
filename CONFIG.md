@@ -68,6 +68,7 @@ Engine เพิ่มเติม (engine RDP/Security เปิดถาวร
 | `rule_prefix` | `RDPGuard Block` | คำนำหน้าชื่อ rule ใน Windows Firewall เช่น `RDPGuard Block 203.0.113.9` (ดูใน `wf.msc`) |
 | `profile` | `any` | Profile ของ rule: `any` / `domain` / `private` / `public` — `any` ครอบคลุมทุก network profile |
 | `blocked_ports` | *(ว่าง)* | จำกัดพอร์ตที่บล็อก เช่น `3389,1433,22` (ว่าง = บล็อกทุกพอร์ตจาก IP นั้น) — rule จะเป็น TCP + เฉพาะพอร์ตเหล่านี้ |
+| `single_rule` | `true` | **โหมด rule เดียวแบบ RDPGuard** — rule เดียวชื่อ `rule_prefix` แล้วเพิ่ม/ลบ IP ในรายการ RemoteAddresses ตาม IP ที่โจมตี (ไม่สร้าง rule ต่อ IP — `wf.msc` สะอาด ไม่รกแม้ IP เยอะ) `false` = สร้าง rule แยกต่อ IP |
 
 กลไกการบล็อก: ใช้ HNetCfg COM API (`FwPolicy2`) เป็นหลัก ถ้าล้มเหลวจะ fallback ไป `netsh advfirewall` เอง
 

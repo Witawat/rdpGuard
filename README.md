@@ -6,8 +6,9 @@ RDP brute-force protection สำหรับ Windows Server / Windows Desktop �
 
 | รายการ | ค่า |
 |---|---|
-| เวอร์ชัน | 1.0.0 |
-| ภาษา | Python 3.8+ (รองรับ Windows 7 SP1 / 8.1 / 10 / 11, Server 2008 R2 SP1 / 2012 / 2016 / 2019 / 2022) |
+| เวอร์ชัน | 1.4.2 |
+| ภาษา | Python 3.8+ |
+| Windows | source: 7 SP1 / 8.1 / 10 / 11 + Server 2008 R2 SP1 ขึ้นไป · exe (build ด้วย Python 3.11): 8.1 / 10 / 11 + Server 2012 ขึ้นไป (ดู INSTALL.md) |
 | Dependency | pywin32 อย่างเดียว (web UI ใช้ stdlib ล้วน) |
 | Web UI | http://127.0.0.1:8123 (ภาษาไทย, เปลี่ยนพอร์ตได้) |
 

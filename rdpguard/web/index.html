@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RDPGuard</title>
-<link rel="stylesheet" href="/style.css?v=1.4.1">
+<link rel="stylesheet" href="/style.css?v=1.4.2">
 </head>
 <body>
 
@@ -200,6 +200,7 @@
           <tbody></tbody>
         </table>
         <div class="hint" style="margin-top:0.5rem">ปุ่ม "ตรวจ cmd" = คัดลอกคำสั่ง Windows ตรวจสอบ rule + event log ของ IP นั้นไปวางใน Command Prompt (admin)</div>
+        <div class="hint" id="blocked-count-warn" style="display:none; margin-top:0.5rem; color:var(--warn)"></div>
         <div class="add-row" style="margin-top:0.7rem">
           <button class="danger" id="unblock-all-btn" title="ฉุกเฉิน: ปลดบล็อกทุก IP ที่ RDPGuard บล็อกไว้">ปลดบล็อกทั้งหมด (ฉุกเฉิน)</button>
           <span class="hint">ใช้เมื่อถูกล็อกตัวเอง — ปลดทุก IP ที่ถูกบล็อกทันที</span>
@@ -210,7 +211,7 @@
 
     <div class="two-col">
       <section class="panel">
-        <div class="panel-head"><h2>Whitelist</h2><div class="spacer"></div><span class="hint">ไม่บล็อกเด็ดขาด</span></div>
+        <div class="panel-head"><h2>Whitelist</h2><div class="spacer"></div><span class="hint">เพิ่มแล้วปลดบล็อกทันที + ไม่บล็อกเด็ดขาด</span></div>
         <div class="panel-body">
           <div class="add-row">
             <input type="text" id="wl-ip" class="mono" placeholder="IP หรือ CIDR">
@@ -225,7 +226,7 @@
       </section>
 
       <section class="panel">
-        <div class="panel-head"><h2>Blacklist</h2><div class="spacer"></div><span class="hint">บล็อกทันที</span></div>
+        <div class="panel-head"><h2>Blacklist</h2><div class="spacer"></div><span class="hint">เพิ่มแล้วบล็อกทันที (สร้าง rule เลย) — ลบ = ปลดบล็อก</span></div>
         <div class="panel-body">
           <div class="add-row">
             <input type="text" id="bl-ip" class="mono" placeholder="IP หรือ CIDR">
@@ -256,6 +257,21 @@
     </section>
     <section class="panel">
       <div class="panel-head">
+        <h2>Session / Remote ที่ใช้งานอยู่</h2>
+        <div class="spacer"></div>
+        <span class="hint">qwinsta — ดูว่าใครล็อกอิน RDP/console อยู่ตอนนี้ (refresh อัตโนมัติ 10 วิ)</span>
+      </div>
+      <div class="panel-body">
+        <table id="sessions-table">
+          <thead><tr><th>ชนิด</th><th>ผู้ใช้</th><th>Session ID</th><th>สถานะ</th><th>เริ่มเมื่อ</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="empty" id="sessions-empty" style="display:none">ไม่มี session (หรือไม่มีสิทธิ์อ่าน — service/SYSTEM อ่านได้)</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
         <h2>Log การทำงาน</h2>
         <div class="spacer"></div>
         <span class="hint" id="log-file-hint"></span>
@@ -269,6 +285,6 @@
 </div>
 
 <div class="toast-wrap" id="toasts"></div>
-<script src="/app.js?v=1.4.1"></script>
+<script src="/app.js?v=1.4.2"></script>
 </body>
 </html>

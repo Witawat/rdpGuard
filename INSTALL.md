@@ -4,10 +4,15 @@
 
 ### Windows ที่รองรับ
 
-| OS | สถานะ |
-|---|---|
-| Windows 7 SP1 / 8.1 / 10 / 11 | รองรับ |
-| Windows Server 2008 R2 SP1 / 2012 / 2016 / 2019 / 2022 | รองรับ |
+| OS | โหมด source (python) | โหมด exe |
+|---|---|---|
+| Windows 7 SP1 / Server 2008 R2 SP1 | ✅ Python **3.8.10** (เวอร์ชันสุดท้ายที่รันบน Win7) | ⚠️ ต้อง build เองด้วย Python 3.8 + PyInstaller 5.x (exe ที่แจก build ด้วย Python 3.11 รันไม่ได้บน Win7) |
+| Windows 8.1 / 10 / 11 | ✅ Python 3.8 – 3.12 | ✅ exe ปัจจุบัน (build ด้วย Python 3.11) |
+| Windows Server 2012 / 2016 / 2019 / 2022 / 2025 | ✅ Python 3.8 – 3.12 | ✅ exe ปัจจุบัน |
+
+> เหตุผล: Python 3.9+ ยกเลิกการสนับสนุน Windows 7 (PEP 11) — ส่วนประกอบที่ใช้ (HNetCfg COM, event log, netsh) มีครบตั้งแต่ Windows Vista/7 ทั้งสิ้น
+>
+> วิธี build exe สำหรับ Win7: ติดตั้ง Python 3.8.10 → `build.bat` (PyInstaller รุ่นที่เข้ากับ Python 3.8) → เอา `dist\rdpguard.exe` ไปใช้บน Win7
 
 ### Python
 
@@ -16,7 +21,7 @@
   - ดาวน์โหลด: https://www.python.org/downloads/windows/
   - ตอนติดตั้งอย่าลืมติ๊ก **"Add python.exe to PATH"**
 
-> ไม่อยากลง Python บนเครื่องจริง? สร้าง exe ด้วย `build.bat` แล้วเอา `dist\rdpguard.exe` ไปรันบนเครื่องอื่นได้เลย (ดูหัวข้อ 5)
+> ไม่อยากลง Python บนเครื่องจริง? สร้าง exe ด้วย `build.bat` แล้วเอา `dist\rdpguard.exe` ไปรันบนเครื่องอื่นได้เลย (ดูหัวข้อ 5) — หมายเหตุ: exe ที่ build ด้วย Python 3.11 เริ่มต้นที่ Windows 8.1 ขึ้นไป
 
 ## 2. ตรวจสอบ Python
 

@@ -21,24 +21,25 @@ class Monitor:
     def __init__(self, cfg=None):
         self.cfg = cfg or config_mod.load_config()
         self.db = Database()
-        prefix = config_mod.get(self.cfg, "firewall", "rule_prefix", "RDPGuard Block")
-        profile = config_mod.get(self.cfg, "firewall", "profile", "any")
-        self.fw = FirewallManager(rule_prefix=prefix, profile=profile)
-        ports = config_mod.get(self.cfg, "firewall", "blocked_ports", "").strip()
-        self.fw.ports = [p.strip() for p in ports.split(",") if p.strip()] if ports else []
+        self._apply_fw_config()
         self.detector = BruteForceDetector(self.db, self.fw, cfg=self.cfg)
         self._engines = []
         self._stop = threading.Event()
         self._cleaner = None
         self.running = False
 
+    def _apply_fw_config(self):
+        prefix = config_mod.get(self.cfg, "firewall", "rule_prefix", "RDPGuard Block")
+        profile = config_mod.get(self.cfg, "firewall", "profile", "any")
+        self.fw = FirewallManager(rule_prefix=prefix, profile=profile)
+        ports = config_mod.get(self.cfg, "firewall", "blocked_ports", "").strip()
+        self.fw.ports = [p.strip() for p in ports.split(",") if p.strip()] if ports else []
+        self.fw.single_rule = config_mod.get_bool(self.cfg, "firewall", "single_rule", True)
+
     def reload(self):
         self.cfg = config_mod.load_config()
         self.detector.reload(self.cfg)
-        prefix = config_mod.get(self.cfg, "firewall", "rule_prefix", "RDPGuard Block")
-        profile = config_mod.get(self.cfg, "firewall", "profile", "any")
-        self.fw.rule_prefix = prefix
-        self.fw.profile = profile
+        self._apply_fw_config()
         self._restart_engines()
         log.info("โหลด config ใหม่เรียบร้อย")
 
@@ -101,6 +102,19 @@ class Monitor:
                 if self.fw.remove_block(ip):
                     self.db.unblock_ip(ip, by="whitelist")
                     log.warning("ปลดบล็อก IP %s (อยู่ใน whitelist/never_block_ips)", ip)
+                continue
+            # firewall reconcile: DB บอก blocked แต่ rule ใน firewall หาย (ถูกลบ/รีเซ็ต) → สร้างกลับ
+            if not self.fw.rule_exists(ip):
+                ports = config_mod.get(self.cfg, "firewall", "blocked_ports", "").strip()
+                ok = self.fw.add_block(
+                    ip,
+                    ports=[p.strip() for p in ports.split(",") if p.strip()] if ports else None,
+                )
+                log.warning(
+                    "firewall reconcile: สร้าง rule กลับให้ %s (DB มีแต่ firewall ไม่มี) — %s",
+                    ip,
+                    "OK" if ok else "FAIL",
+                )
 
     def unblock_all(self):
         """ปลดบล็อกทั้งหมด (ฉุกเฉิน) — คืนจำนวนที่ปลด"""
@@ -121,6 +135,35 @@ class Monitor:
             self.db.unblock_ip(ip, by="allow")
             return True, f"เพิ่ม {ip} ใน whitelist และปลดบล็อกแล้ว"
         return True, f"เพิ่ม {ip} ใน whitelist แล้ว"
+
+    def blacklist_block(self, ip):
+        """เพิ่ม blacklist แล้วบล็อก IP นั้นทันที (สร้าง rule firewall เลย ไม่รอให้โจมตี)"""
+        if not is_valid_ip_or_cidr(ip):
+            return False, "รูปแบบ IP/CIDR ไม่ถูกต้อง"
+        if self.db.is_blocked(ip):
+            return True, "IP นี้ถูกบล็อกอยู่แล้ว"
+        hours = config_mod.get_int(self.cfg, "detection", "block_hours", 24)
+        expires = ""
+        if hours > 0:
+            expires = (datetime.now(timezone.utc) + timedelta(hours=hours)).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+        ports = config_mod.get(self.cfg, "firewall", "blocked_ports", "").strip()
+        ok = self.fw.add_block(
+            ip, ports=[p.strip() for p in ports.split(",") if p.strip()] if ports else None
+        )
+        self.db.block_ip(
+            ip,
+            reason="IP อยู่ใน blacklist — บล็อกทันที",
+            source="blacklist",
+            expires=expires,
+            rule_name=self.fw._rule_name(ip),
+        )
+        if ok:
+            log.warning("blacklist: บล็อก IP %s ทันที (จนถึง %s)", ip, expires or "ถาวร")
+            return True, "เพิ่ม blacklist + บล็อกทันทีแล้ว"
+        log.error("blacklist: เพิ่ม rule firewall สำหรับ %s ล้มเหลว", ip)
+        return False, "เพิ่ม blacklist แล้ว แต่สร้าง rule firewall ไม่ได้ (สิทธิ์ admin/service) — จะบล็อกให้เมื่อ IP นั้นพยายามโจมตี"
 
     def manual_block(self, ip, hours=24):
         """บล็อก IP ด้วยมือ (จาก Web UI / CLI) — รองรับ IP เดี่ยวหรือ CIDR"""

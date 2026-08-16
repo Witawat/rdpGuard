@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.4.2 (2026-08-16)
+
+- **โหมด rule เดียวแบบ RDPGuard** (`firewall.single_rule = true` ค่าเริ่มต้น) — Windows Firewall มี rule เดียวชื่อ `RDPGuard Block` แล้วเพิ่ม/ลบ IP ในรายการ RemoteAddresses ตาม IP ที่โจมตี (ไม่สร้าง rule ต่อ IP) — ตั้งค่าได้ที่หน้า ตั้งค่า → Windows Firewall
+- ปลดบล็อก/หมดอายุ: ถอด IP ออกจากรายการ rule เดียว — ถ้ารายการว่าง ลบ rule ทิ้ง
+- รองรับการล้าง rule แบบ per-IP เก่า (จากโหมดเดิม) อัตโนมัติ
+- **firewall reconcile (self-heal)**: cleanup ตรวจทุก 60 วิ — DB บอก blocked แต่ rule ใน firewall หาย (ถูกลบ/รีเซ็ต) → สร้าง rule กลับให้อัตโนมัติ
+- จัดการค่าที่ Windows Firewall คืนเป็น `1.2.3.4/255.255.255.255` (normalize เป็น /32/IP เปล่า + เช็ค CIDR membership)
+- Web UI: คำเตือนเมื่อมี IP ถูกบล็อกเกิน 50/200 พร้อมคำแนะนำ (CIDR/ลด block_hours/ปลดล้าง) + เอกสาร "มี IP โดนบล็อกเยอะมาก (>50) ทำอย่างไร?"
+- **Blacklist บล็อกทันทีที่เพิ่ม** (สร้าง rule firewall เลย ไม่ต้องรอให้ IP นั้นโจมตี) — ลบออกจาก blacklist = ปลดบล็อกให้อัตโนมัติ
+- **Whitelist ปลดบล็อกทันทีที่เพิ่ม** (ถ้า IP ถูกบล็อกอยู่ — ไม่ต้องรอ reconcile 60 วิ) + ไม่ถูกบล็อกเด็ดขาด
+- **พาเนล "Session / Remote ที่ใช้งานอยู่"** — ดูว่าใครล็อกอิน RDP/console/network อยู่ตอนนี้ (qwinsta → query session → PowerShell CIM fallback รองรับ Win7–11) — session RDP ที่ Active แสดง badge เตือน
+
 ## 1.4.1 (2026-08-16)
 
 - **ขยายบล็อก IP ขาประจำ (repeat offender)**: โดนบล็อกครบ `escalate_after_blocks` ครั้ง (ค่าเริ่มต้น 3 ครั้ง/30 วัน) แล้วกลับมาโจมตีอีก → ขยายเป็น `escalate_block_hours` (7 วัน) หรือถาวร (`escalate_to_permanent`) — ตั้งค่าได้ในหน้า ตั้งค่า (กลุ่ม การตรวจจับ)

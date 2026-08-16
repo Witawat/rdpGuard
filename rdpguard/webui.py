@@ -157,6 +157,103 @@ def _health_data():
     }
 
 
+def _parse_qwinsta(out):
+    """parse ผลลัพธ์ qwinsta/query session -> [{kind, user, id, state, start}]"""
+    sessions = []
+    for line in out.splitlines()[1:]:
+        line = line.rstrip()
+        if not line.strip():
+            continue
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        name = parts[0].lstrip(">")
+        id_idx = None
+        for i, p in enumerate(parts):
+            if p.isdigit():
+                id_idx = i
+                break
+        if id_idx is None:
+            continue
+        user = parts[1] if id_idx == 2 else (parts[1] if id_idx == 3 else "")
+        sid = parts[id_idx]
+        state = parts[id_idx + 1] if id_idx + 1 < len(parts) else ""
+        stype = parts[id_idx + 2] if id_idx + 2 < len(parts) else ""
+        kind = "rdp" if stype == "RDP-Tcp" else ("console" if name == "console" else "system" if name == "services" else (stype or name))
+        sessions.append(
+            {"kind": kind, "user": user, "id": sid, "state": state, "start": ""}
+        )
+    return sessions
+
+
+_POWERSHELL_SESSIONS = r"""
+$out = @()
+try {
+    $sessions = Get-CimInstance Win32_LogonSession -ErrorAction Stop | Where-Object { $_.LogonType -in @(2,3,10) -and $_.LogonId -ne 0 }
+    foreach ($s in $sessions) {
+        $user = ""
+        try {
+            $u = Get-CimInstance Win32_LoggedOnUser -ErrorAction SilentlyContinue |
+                Where-Object { $_.Dependent -match ('LogonId="' + $s.LogonId + '"') } |
+                Select-Object -First 1
+            if ($u) {
+                $m = [regex]::Match($u.Antecedent, 'Name="([^"]+)"')
+                if ($m.Success) { $user = $m.Groups[1].Value }
+            }
+        } catch {}
+        $out += [PSCustomObject]@{ logonId=$s.LogonId; logonType=$s.LogonType; startTime=[string]$s.StartTime; user=$user }
+    }
+} catch {}
+$out | ConvertTo-Json -Compress
+"""
+
+
+def _powershell_json(script):
+    """รัน PowerShell script แล้วคืน JSON string (ใช้ EncodedCommand กัน quoting ปัญหา)"""
+    import base64
+    import subprocess
+
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    result = subprocess.run(
+        [
+            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-EncodedCommand",
+            encoded,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    return result.stdout or ""
+
+
+def _parse_cim_sessions(raw):
+    """แปลง JSON จาก PowerShell CIM -> [{kind, user, id, state, start}]"""
+    sessions = []
+    try:
+        data = json.loads(raw or "[]")
+    except Exception:
+        return sessions
+    if not isinstance(data, list):
+        return sessions
+    kind_map = {2: "console", 3: "network", 10: "rdp"}
+    for item in data:
+        lt = int(item.get("logonType") or 0)
+        sessions.append(
+            {
+                "kind": kind_map.get(lt, f"type{lt}"),
+                "user": str(item.get("user") or ""),
+                "id": str(item.get("logonId") or ""),
+                "state": "Active",
+                "start": str(item.get("startTime") or ""),
+            }
+        )
+    return sessions
+
+
 class RDPGuardHTTPServer(ThreadingHTTPServer):
     """ThreadingHTTPServer ที่เงียบต่อการตัดการเชื่อมต่อจาก client (F5/ปิดแท็บ)"""
 
@@ -265,6 +362,8 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
             self._handle_detection_state()
         elif path == "/api/log":
             self._handle_log(query)
+        elif path == "/api/sessions":
+            self._handle_sessions()
         elif path == "/api/overview":
             self._handle_overview()
         elif path == "/api/events":
@@ -385,6 +484,31 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
                 )
             },
         )
+
+    def _handle_sessions(self):
+        """Session ที่ใช้งานอยู่ — ดูว่าใคร remote เข้ามา (qwinsta -> query -> PowerShell CIM)"""
+        if not self._require_auth():
+            return
+        import subprocess
+
+        out = ""
+        for cmd in (
+            [r"C:\Windows\System32\qwinsta.exe"],
+            ["qwinsta"],
+            [r"C:\Windows\System32\query.exe", "session"],
+        ):
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                out = result.stdout or ""
+            except Exception as exc:
+                log.debug("session cmd %s ล้มเหลว: %s", cmd, exc)
+            if out.strip():
+                break
+        if out.strip():
+            sessions = _parse_qwinsta(out)
+        else:
+            sessions = _parse_cim_sessions(_powershell_json(_POWERSHELL_SESSIONS))
+        _json_ok(self, {"sessions": sessions})
 
     def _handle_overview(self):
         if not self._require_auth():
@@ -609,7 +733,12 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
         if not _monitor.db.add_whitelist(ip, str(body.get("note", ""))):
             _json_error(self, "IP นี้อยู่ใน whitelist แล้ว")
             return
-        _json_ok(self, {"message": f"เพิ่ม {ip} ใน whitelist แล้ว"})
+        # ถ้า IP ถูกบล็อกอยู่ -> ปลดทันที (whitelist = กันเด็ดขาด)
+        if _monitor.db.is_blocked(ip):
+            _monitor.manual_unblock(ip)
+            _json_ok(self, {"message": f"เพิ่ม {ip} ใน whitelist แล้ว — ปลดบล็อกให้ทันที"})
+            return
+        _json_ok(self, {"message": f"เพิ่ม {ip} ใน whitelist แล้ว — จะไม่ถูกบล็อกเด็ดขาด"})
 
     def _handle_remove_whitelist(self, ip):
         _monitor.db.remove_whitelist(ip)
@@ -623,10 +752,15 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
         if not _monitor.db.add_blacklist(ip, str(body.get("note", ""))):
             _json_error(self, "IP นี้อยู่ใน blacklist แล้ว")
             return
-        _json_ok(self, {"message": f"เพิ่ม {ip} ใน blacklist แล้ว"})
+        ok, message = _monitor.blacklist_block(ip)
+        _json_ok(self, {"message": message})
 
     def _handle_remove_blacklist(self, ip):
         _monitor.db.remove_blacklist(ip)
+        # ถ้า IP ถูกบล็อกเพราะ blacklist -> ปลดให้ด้วย (ผู้ใช้เอาออก = อยากปลด)
+        row = _monitor.db.is_blocked(ip)
+        if row and row.get("source") == "blacklist":
+            _monitor.manual_unblock(ip)
         _json_ok(self, {"message": "ลบออกจาก blacklist แล้ว"})
 
     def _handle_get_settings(self):
@@ -659,7 +793,7 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
                 "escalate_to_permanent",
                 "escalation_window_days",
             },
-            "firewall": {"rule_prefix", "profile", "blocked_ports"},
+            "firewall": {"rule_prefix", "profile", "blocked_ports", "single_rule"},
             "webui": {"host", "port", "password"},
             "engines": {
                 "openssh",

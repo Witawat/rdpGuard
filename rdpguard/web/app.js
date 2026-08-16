@@ -93,7 +93,32 @@ function showApp() {
   appIntervals.push(setInterval(refreshBlocked, 5000));
   appIntervals.push(setInterval(refreshService, 10000));
   appIntervals.push(setInterval(refreshLog, 5000));
+  appIntervals.push(setInterval(refreshSessions, 10000));
   checkSetup();
+}
+
+/* ---------- sessions (qwinsta) ---------- */
+
+async function refreshSessions() {
+  try {
+    const { data } = await api("/api/sessions");
+    const tbody = $("sessions-table").querySelector("tbody");
+    tbody.innerHTML = "";
+    $("sessions-empty").style.display = data.sessions.length ? "none" : "";
+    const kindLabel = { rdp: "RDP (remote)", console: "Console (จอเครื่อง)", network: "Network (SMB/แชร์)", system: "System" };
+    for (const s of data.sessions) {
+      const isRdp = s.kind === "rdp";
+      const active = s.state === "Active" || s.state === "Conn";
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${esc(kindLabel[s.kind] || s.kind)}</td>
+        <td>${esc(s.user || "-")}</td>
+        <td class="mono nw">${esc(s.id)}</td>
+        <td>${isRdp && active ? '<span class="badge danger">RDP ใช้งานอยู่!</span>' : active ? '<span class="badge success">Active</span>' : `<span class="badge ntlm">${esc(s.state || "-")}</span>`}</td>
+        <td class="mono nw">${s.start ? esc(s.start) : ""}</td>`;
+      tbody.appendChild(tr);
+    }
+  } catch (e) {}
 }
 
 /* ---------- detection toggle ---------- */
@@ -519,6 +544,18 @@ async function refreshBlocked() {
     const tbody = $("blocked-table").querySelector("tbody");
     tbody.innerHTML = "";
     $("blocked-empty").style.display = data.blocked.length ? "none" : "";
+    const warn = $("blocked-count-warn");
+    if (warn) {
+      if (data.blocked.length > 200) {
+        warn.style.display = "";
+        warn.innerHTML = `<span class="h-err">&#9888;</span> มี IP ถูกบล็อก ${data.blocked.length} IP (${data.blocked.length} rules) — จำนวนเยอะมาก แนะนำ: บล็อกแบบ CIDR (subnet), ลด block_hours, หรือปลดล้าง IP ที่ไม่จำเป็น`;
+      } else if (data.blocked.length > 50) {
+        warn.style.display = "";
+        warn.innerHTML = `<span class="h-mute">&#9888;</span> มี IP ถูกบล็อก ${data.blocked.length} IP (${data.blocked.length} rules) — ถ้า IP โจมตีมาจาก subnet เดียวกัน แนะนำบล็อกแบบ CIDR (เช่น 203.0.113.0/24) แทนราย IP`;
+      } else {
+        warn.style.display = "none";
+      }
+    }
     data.blocked.forEach((b, i) => {
       const tr = document.createElement("tr");
       tr.dataset.ip = b.ip;
@@ -715,6 +752,7 @@ const SETTINGS_UI = {
   firewall: {
     title: "Windows Firewall",
     fields: [
+      { key: "single_rule", label: "ใช้ rule เดียวรวมทุก IP (แบบ RDPGuard)", type: "bool" },
       { key: "rule_prefix", label: "คำนำหน้าชื่อ rule", type: "text" },
       { key: "profile", label: "Profile", type: "select", options: ["any", "domain", "private", "public"] },
       { key: "blocked_ports", label: "จำกัดพอร์ตที่บล็อก (ว่าง = ทุกพอร์ต)", type: "text" },

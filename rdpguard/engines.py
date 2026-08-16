@@ -95,9 +95,12 @@ def _looks_like_ip(value):
 
 
 def _pick_user(ins, idx_new, idx_old):
-    """Win10 เอา TargetUserName (ins[6]/ins[7]) แต่ Win7 ตำแหน่งนั้นเป็นตัวเลข (พอร์ต)"""
+    """Win10 เอา TargetUserName (ins[6]/ins[7]) แต่ Win7 ตำแหน่งนั้นเป็นตัวเลข (พอร์ต)
+    และข้ามค่าแบบ LogonId (0x...) / SID (S-1-...) ที่ไม่ใช่ชื่อจริง"""
     if idx_new < len(ins) and ins[idx_new] and not ins[idx_new].isdigit():
-        return ins[idx_new]
+        v = ins[idx_new]
+        if not v.lower().startswith("0x") and not v.startswith("S-1-"):
+            return v
     return ins[idx_old] if idx_old < len(ins) else "-"
 
 
@@ -302,12 +305,15 @@ class SecurityEngine(BaseEngine):
                 event_id=4625,
             )
         elif eid == 4624:
+            logon_type = _find_logon_type(ins)
+            if logon_type not in (3, 10):
+                return  # ข้าม local/service logon (type 2/5 ฯลฯ) — สนใจแค่ remote (3=Network, 10=RDP)
             self._emit(
                 "success",
                 ip=_find_ip(ins, (12, 5)),
                 user=_pick_user(ins, 6, 0),
                 domain=_pick_user(ins, 7, 1),
-                logon_type=_find_logon_type(ins),
+                logon_type=logon_type,
                 event_id=4624,
             )
         elif eid == 4776:
