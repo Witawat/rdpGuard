@@ -28,15 +28,18 @@ _WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 _LOGIN_MAX_FAILS = 5
 _LOGIN_LOCK_SECONDS = 300
 _login_guard = {"fails": 0, "locked_until": 0.0}
+_login_lock = threading.Lock()  # กัน read-modify-write ชนเมื่อโจมตี login พร้อมกันหลาย connection
 
 _SESSION_MAX_AGE = 24 * 3600
 _sessions = {}  # token -> expires (epoch)
+_session_lock = threading.Lock()  # ThreadingHTTPServer เรียก handler หลาย thread พร้อมกัน
 
 
 def _new_session():
-    _cleanup_sessions()
-    token = secrets.token_urlsafe(32)
-    _sessions[token] = time.time() + _SESSION_MAX_AGE
+    with _session_lock:
+        _cleanup_sessions()
+        token = secrets.token_urlsafe(32)
+        _sessions[token] = time.time() + _SESSION_MAX_AGE
     return token
 
 
@@ -47,7 +50,8 @@ def _cleanup_sessions():
 
 
 def _invalidate_all_sessions():
-    _sessions.clear()
+    with _session_lock:
+        _sessions.clear()
 
 
 _monitor = None
@@ -186,74 +190,67 @@ def _parse_qwinsta(out):
     return sessions
 
 
-_POWERSHELL_SESSIONS = r"""
-$out = @()
-try {
-    $sessions = Get-CimInstance Win32_LogonSession -ErrorAction Stop | Where-Object { $_.LogonType -in @(2,3,10) -and $_.LogonId -ne 0 }
-    foreach ($s in $sessions) {
-        $user = ""
-        try {
-            $u = Get-CimInstance Win32_LoggedOnUser -ErrorAction SilentlyContinue |
-                Where-Object { $_.Dependent -match ('LogonId="' + $s.LogonId + '"') } |
-                Select-Object -First 1
-            if ($u) {
-                $m = [regex]::Match($u.Antecedent, 'Name="([^"]+)"')
-                if ($m.Success) { $user = $m.Groups[1].Value }
-            }
-        } catch {}
-        $out += [PSCustomObject]@{ logonId=$s.LogonId; logonType=$s.LogonType; startTime=[string]$s.StartTime; user=$user }
-    }
-} catch {}
-$out | ConvertTo-Json -Compress
-"""
+# หมายเหตุ: เดิมมี fallback อ่าน session ผ่าน PowerShell CIM (Win32_LogonSession) —
+# ถูกลบออกเพราะ Norton Behavioral Protection ฟลาก powershell.exe + embedded script
+# (IDP.HELU.PSE...) — ตอนนี้ใช้ WTS API (win32ts) ตรง ๆ ซึ่งเป็น DLL call ใน process
+# ตัวเอง ไม่มีการ spawn process ภายนอก
 
 
-def _powershell_json(script):
-    """รัน PowerShell script แล้วคืน JSON string (ใช้ EncodedCommand กัน quoting ปัญหา)"""
-    import base64
-    import subprocess
-
-    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
-    result = subprocess.run(
-        [
-            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-EncodedCommand",
-            encoded,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=15,
-    )
-    return result.stdout or ""
-
-
-def _parse_cim_sessions(raw):
-    """แปลง JSON จาก PowerShell CIM -> [{kind, user, id, state, start}]"""
+def _wts_sessions():
+    """อ่าน session ผ่าน WTS API (win32ts) — ไม่ spawn process ภายนอก
+    รองรับเครื่องที่ไม่มี qwinsta/query session (Win11 บางรุ่น)"""
+    try:
+        import win32ts
+    except Exception:
+        return []
     sessions = []
     try:
-        data = json.loads(raw or "[]")
+        for s in win32ts.WTSEnumerateSessions():
+            try:
+                if isinstance(s, dict):
+                    sid = s["SessionId"]
+                    name = s["WinStationName"]
+                    state = s["State"]
+                else:
+                    sid = s.SessionId
+                    name = s.WinStationName
+                    state = s.State
+                handle = win32ts.WTS_CURRENT_SERVER_HANDLE
+                proto = win32ts.WTSQuerySessionInformation(handle, sid, win32ts.WTSClientProtocolType)
+                user = win32ts.WTSQuerySessionInformation(handle, sid, win32ts.WTSUserName)
+                if isinstance(user, bytes):
+                    user = user.decode("utf-8", "ignore")
+            except Exception:
+                continue
+            name_l = (name or "").lower()
+            kind = (
+                "rdp"
+                if proto == win32ts.WTS_PROTOCOL_TYPE_RDP
+                else "console"
+                if name_l == "console"
+                else "system"
+                if name_l == "services"
+                else (name_l or "session")
+            )
+            state_label = {
+                win32ts.WTSActive: "Active",
+                win32ts.WTSConnected: "Conn",
+                win32ts.WTSDisconnected: "Disc",
+                win32ts.WTSIdle: "Idle",
+                win32ts.WTSListen: "Listen",
+            }.get(state, str(state))
+            sessions.append(
+                {
+                    "kind": kind,
+                    "user": str(user or ""),
+                    "id": str(sid),
+                    "state": state_label,
+                    "start": "",
+                }
+            )
     except Exception:
-        return sessions
-    if not isinstance(data, list):
-        return sessions
-    kind_map = {2: "console", 3: "network", 10: "rdp"}
-    for item in data:
-        lt = int(item.get("logonType") or 0)
-        sessions.append(
-            {
-                "kind": kind_map.get(lt, f"type{lt}"),
-                "user": str(item.get("user") or ""),
-                "id": str(item.get("logonId") or ""),
-                "state": "Active",
-                "start": str(item.get("startTime") or ""),
-            }
-        )
+        log.debug("WTS อ่าน session ไม่ได้", exc_info=True)
     return sessions
-
-
 class RDPGuardHTTPServer(ThreadingHTTPServer):
     """ThreadingHTTPServer ที่เงียบต่อการตัดการเชื่อมต่อจาก client (F5/ปิดแท็บ)"""
 
@@ -291,7 +288,8 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
             return {}
         raw = self.rfile.read(length)
         try:
-            return json.loads(raw.decode("utf-8"))
+            data = json.loads(raw.decode("utf-8"))
+            return data if isinstance(data, dict) else {}
         except Exception:
             return {}
 
@@ -307,11 +305,12 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
         token = self._cookie_value("rdpguard_session") or ""
         if not token:
             return False
-        expires = _sessions.get(token)
-        if not expires or expires <= time.time():
-            _sessions.pop(token, None)
-            return False
-        return True
+        with _session_lock:
+            expires = _sessions.get(token)
+            if not expires or expires <= time.time():
+                _sessions.pop(token, None)
+                return False
+            return True
 
     def _require_auth(self):
         if not self._authorized():
@@ -442,16 +441,18 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
 
     def _handle_login(self, body):
         now = time.time()
-        if _login_guard["locked_until"] > now:
-            left = int(_login_guard["locked_until"] - now)
-            _json_error(self, f"พยายามมากเกินไป — รอ {left} วินาที", status=429)
-            return
+        with _login_lock:
+            if _login_guard["locked_until"] > now:
+                left = int(_login_guard["locked_until"] - now)
+                _json_error(self, f"พยายามมากเกินไป — รอ {left} วินาที", status=429)
+                return
         cfg = config_mod.load_config()
         expected = config_mod.get(cfg, "webui", "password", "")
         given = str(body.get("password", ""))
         if expected and secrets.compare_digest(given, expected):
             token = _new_session()
-            _login_guard["fails"] = 0
+            with _login_lock:
+                _login_guard["fails"] = 0
             _json_ok(
                 self,
                 {"token": token},
@@ -463,18 +464,20 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
                 },
             )
             return
-        _login_guard["fails"] += 1
-        if _login_guard["fails"] >= _LOGIN_MAX_FAILS:
-            _login_guard["locked_until"] = now + _LOGIN_LOCK_SECONDS
-            _login_guard["fails"] = 0
-            _json_error(self, "รหัสผิด 5 ครั้ง — ล็อกการพยายาม 5 นาที", status=429)
-            return
+        with _login_lock:
+            _login_guard["fails"] += 1
+            if _login_guard["fails"] >= _LOGIN_MAX_FAILS:
+                _login_guard["locked_until"] = now + _LOGIN_LOCK_SECONDS
+                _login_guard["fails"] = 0
+                _json_error(self, "รหัสผิด 5 ครั้ง — ล็อกการพยายาม 5 นาที", status=429)
+                return
         _json_error(self, "รหัสไม่ถูกต้อง", status=401)
 
     def _handle_logout(self):
         token = self._cookie_value("rdpguard_session") or ""
         if token:
-            _sessions.pop(token, None)
+            with _session_lock:
+                _sessions.pop(token, None)
         _json_ok(
             self,
             {"message": "ออกจากระบบแล้ว"},
@@ -486,7 +489,8 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
         )
 
     def _handle_sessions(self):
-        """Session ที่ใช้งานอยู่ — ดูว่าใคร remote เข้ามา (qwinsta -> query -> PowerShell CIM)"""
+        """Session ที่ใช้งานอยู่ — ดูว่าใคร remote เข้ามา (qwinsta -> query session -> WTS API)
+        หมายเหตุ: ไม่ใช้ PowerShell (กัน Norton ฟลาก powershell.exe) — WTS เป็น DLL call ใน process"""
         if not self._require_auth():
             return
         import subprocess
@@ -504,10 +508,7 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
                 log.debug("session cmd %s ล้มเหลว: %s", cmd, exc)
             if out.strip():
                 break
-        if out.strip():
-            sessions = _parse_qwinsta(out)
-        else:
-            sessions = _parse_cim_sessions(_powershell_json(_POWERSHELL_SESSIONS))
+        sessions = _parse_qwinsta(out) if out.strip() else _wts_sessions()
         _json_ok(self, {"sessions": sessions})
 
     def _handle_overview(self):
@@ -535,8 +536,7 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
         if not _monitor:
             _json_error(self, "monitor ไม่ได้รัน")
             return
-        count = _monitor.unblock_all()
-        _json_ok(self, {"message": f"ปลดบล็อกทั้งหมดแล้ว ({count} IP)"})
+        _json_ok(self, {"message": _monitor.unblock_all()})
 
     def _handle_self_test(self):
         """Self-test ครบวงจร: เขียน event จำลอง (18456) ลง Application log จริง →
@@ -684,7 +684,7 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
         if not self._require_auth():
             return
         try:
-            limit = min(int(query.get("limit", ["100"])[0]), 500)
+            limit = max(1, min(int(query.get("limit", ["100"])[0]), 500))
         except ValueError:
             limit = 100
         _json_ok(self, {"events": _monitor.db.recent_events(limit) if _monitor else []})
@@ -705,6 +705,9 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
         _json_ok(self, {"blacklist": _monitor.db.list_blacklist() if _monitor else []})
 
     def _handle_block(self, body):
+        if not _monitor:
+            _json_error(self, "monitor ไม่ได้รัน")
+            return
         ip = str(body.get("ip", "")).strip()
         if not _valid_ip_or_cidr(ip):
             _json_error(self, "รูปแบบ IP ไม่ถูกต้อง")
@@ -720,6 +723,9 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
             _json_error(self, message)
 
     def _handle_unblock(self, ip):
+        if not _monitor:
+            _json_error(self, "monitor ไม่ได้รัน")
+            return
         ok, message = _monitor.manual_unblock(ip)
         if ok:
             _json_ok(self, {"message": message})
@@ -727,6 +733,9 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
             _json_error(self, message)
 
     def _handle_add_whitelist(self, body):
+        if not _monitor:
+            _json_error(self, "monitor ไม่ได้รัน")
+            return
         ip = str(body.get("ip", "")).strip()
         if not _valid_ip_or_cidr(ip):
             _json_error(self, "รูปแบบ IP ไม่ถูกต้อง")
@@ -742,10 +751,16 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
         _json_ok(self, {"message": f"เพิ่ม {ip} ใน whitelist แล้ว — จะไม่ถูกบล็อกเด็ดขาด"})
 
     def _handle_remove_whitelist(self, ip):
+        if not _monitor:
+            _json_error(self, "monitor ไม่ได้รัน")
+            return
         _monitor.db.remove_whitelist(ip)
         _json_ok(self, {"message": "ลบออกจาก whitelist แล้ว"})
 
     def _handle_add_blacklist(self, body):
+        if not _monitor:
+            _json_error(self, "monitor ไม่ได้รัน")
+            return
         ip = str(body.get("ip", "")).strip()
         if not _valid_ip_or_cidr(ip):
             _json_error(self, "รูปแบบ IP ไม่ถูกต้อง")
@@ -757,6 +772,9 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
         _json_ok(self, {"message": message})
 
     def _handle_remove_blacklist(self, ip):
+        if not _monitor:
+            _json_error(self, "monitor ไม่ได้รัน")
+            return
         _monitor.db.remove_blacklist(ip)
         # ถ้า IP ถูกบล็อกเพราะ blacklist -> ปลดให้ด้วย (ผู้ใช้เอาออก = อยากปลด)
         row = _monitor.db.is_blocked(ip)
@@ -771,14 +789,13 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
         data = {}
         for section in cfg.sections():
             data[section] = dict(cfg.items(section))
+        # ไม่ส่ง password ตัวจริงกลับ (UI ใช้ password_hidden แสดงสถานะเท่านั้น)
         data["webui"]["password_hidden"] = "***" if data["webui"].get("password") else ""
+        del data["webui"]["password"]
         _json_ok(self, data)
 
     def _handle_save_settings(self, body):
-        with _cfg_lock:
-            cfg = config_mod.load_config()
-            old_password = config_mod.get(cfg, "webui", "password", "")
-            allowed_sections = {"monitor", "detection", "firewall", "webui", "engines"}
+        allowed_sections = {"monitor", "detection", "firewall", "webui", "engines"}
         allowed_keys = {
             "monitor": {"enable", "poll_interval_seconds", "logon_types"},
             "detection": {
@@ -815,26 +832,35 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
                 "generic_logs",
             },
         }
-        try:
-            for section, values in body.items():
-                section = str(section).lower()
-                if section not in allowed_sections or not isinstance(values, dict):
-                    continue
-                for key, value in values.items():
-                    if key not in allowed_keys[section]:
+        if not isinstance(body, dict):
+            body = {}
+        with _cfg_lock:
+            cfg = config_mod.load_config()
+            old_password = config_mod.get(cfg, "webui", "password", "")
+            try:
+                for section, values in body.items():
+                    section = str(section).lower()
+                    if section not in allowed_sections or not isinstance(values, dict):
                         continue
-                    if section == "webui" and key == "password" and not str(value).strip():
-                        continue
-                    cfg.set(section, key, str(value).strip())
-        except Exception as exc:
-            _json_error(self, f"บันทึก config ไม่สำเร็จ: {exc}")
-            return
-        password_changed = False
-        if "webui" in body and isinstance(body.get("webui"), dict):
-            new_pw = str(body["webui"].get("password", "")).strip()
-            if new_pw and new_pw != old_password:
-                password_changed = True
-        config_mod.save_config(cfg)
+                    for key, value in values.items():
+                        if key not in allowed_keys[section]:
+                            continue
+                        if section == "webui" and key == "password" and not str(value).strip():
+                            continue
+                        cfg.set(section, key, str(value).strip())
+            except Exception as exc:
+                _json_error(self, f"บันทึก config ไม่สำเร็จ: {exc}")
+                return
+            password_changed = False
+            if "webui" in body and isinstance(body.get("webui"), dict):
+                new_pw = str(body["webui"].get("password", "")).strip()
+                if new_pw and new_pw != old_password:
+                    password_changed = True
+            try:
+                config_mod.save_config(cfg)
+            except Exception as exc:
+                _json_error(self, f"เขียน config ไม่สำเร็จ: {exc}")
+                return
         if password_changed:
             _invalidate_all_sessions()
         if _monitor:
@@ -924,7 +950,8 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
         if not isinstance(ips, list):
             _json_error(self, "ips ต้องเป็นรายการ")
             return
-        ips = [str(x).strip() for x in ips[:200]]
+        # จำกัดต่อ request (throttle 0.35s/IP — batch ใหญ่ทำให้ request ค้างนาน)
+        ips = [str(x).strip() for x in ips[:20]]
         from . import geoip as geoip_mod
 
         db = _monitor.db if _monitor else None

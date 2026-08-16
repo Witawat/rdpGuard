@@ -49,7 +49,7 @@ python -m PyInstaller --noconfirm rdpguard.spec   # build exe -> dist\rdpguard.e
 - **firewall/event log ต้อง admin/SYSTEM** — เปิด elevated ด้วย `Start-Process -Verb RunAs` (มี UAC popup — บอก user ให้กด Yes)
 - **rebuild exe ต้องไม่มี instance รันอยู่** (exe โดน lock) — ให้ user ปิดหน้าต่าง RDPGuard ก่อนทุกครั้ง
 - 2 process `rdpguard.exe` = ปกติ (PyInstaller onefile: bootloader + child)
-- `qwinsta`/`query session` ไม่มีใน Win11 บางรุ่น — sessions API fallback เป็น PowerShell CIM แล้ว
+- `qwinsta`/`query session` ไม่มีใน Win11 บางรุ่น — พาเนล Session fallback เป็น **WTS API (win32ts)** ตรง ๆ ไม่ spawn process ภายนอก (เดิมเคยใช้ PowerShell CIM — ถูกลบเพราะ Norton Behavioral ฟลาก powershell.exe เป็น IDP.HELU.PSE... — ห้ามนำ PowerShell กลับมาโดยไม่คุยก่อน)
 - Windows Firewall คืน RemoteAddresses เป็น `1.2.3.4/255.255.255.255` — ใช้ `_normalize_entry`/`_entry_contains` ใน firewall.py เสมอ
 - เหตุการณ์ "หาย" จากตาราง = UI แสดงแค่ 80 ล่าสุด (ข้อมูลไม่ถูกลบ)
 - exe (build ด้วย Python 3.11) รันได้ Windows 8.1+ — Win7 ต้อง build ด้วย Python 3.8

@@ -59,6 +59,7 @@ class FirewallManager:
         self.ports = []
         self.single_rule = False
         self._cache = None  # รายการ IP ใน single rule (sync จาก firewall จริง)
+        self._cache_lock = threading.RLock()  # ป้องกัน lost update เมื่อหลาย thread เพิ่ม/ลบพร้อมกัน
         self._com_queue = queue.Queue()
         self._com_worker = threading.Thread(
             target=self._com_worker_loop, name="firewall-com", daemon=True
@@ -203,12 +204,19 @@ class FirewallManager:
     # ---- public API ----
 
     def _sync_cache(self):
-        """โหลดรายการ IP ปัจจุบันของ single rule จาก firewall จริง"""
+        """โหลดรายการ IP ปัจจุบันของ single rule จาก firewall จริง (ต้องถือ _cache_lock)"""
         try:
             self._cache = self._com_call(self._com_get_ips)
         except Exception as exc:
             log.warning("อ่าน single rule ไม่ได้ (%s) — ใช้ cache ว่าง", exc)
             self._cache = []
+
+    def sync(self):
+        """refresh รายการ IP ใน single rule จาก firewall จริง (ใช้ตอน reconcile)"""
+        if not self.single_rule:
+            return
+        with self._cache_lock:
+            self._sync_cache()
 
     def add_block(self, ip, ports=None):
         """เพิ่ม IP ในรายการบล็อก — ports: รายการพอร์ต (None/[] = ทุกพอร์ต)"""
@@ -223,35 +231,36 @@ class FirewallManager:
         return self._add_block_netsh(ip, ports)
 
     def _add_block_single(self, ip, ports):
-        if self._cache is None:
-            self._sync_cache()
-        if any(_entry_contains(x, ip) for x in self._cache):
-            return True
-        new_list = self._cache + [ip]
-        try:
-            self._com_call(self._com_set_ips, new_list, list(ports))
-            self._cache = new_list
-            log.info("single rule: เพิ่ม %s (รวม %d IP)", ip, len(new_list))
-            return True
-        except Exception as exc:
-            log.warning("COM ล้มเหลว (%s) — ลอง netsh แทน", exc)
-        self._netsh(["delete", "rule", f"name={self.rule_prefix}"])
-        args = [
-            "add",
-            "rule",
-            f"name={self.rule_prefix}",
-            "dir=in",
-            "action=block",
-            f"remoteip={','.join(new_list)}",
-            f"profile={_PROFILE_ARG.get(self.profile, 'any')}",
-            "enable=yes",
-        ]
-        if ports:
-            args += ["protocol=TCP", "localport=" + ",".join(str(p) for p in ports)]
-        ok = self._netsh(args)
-        if ok:
-            self._cache = new_list
-        return ok
+        with self._cache_lock:
+            if self._cache is None:
+                self._sync_cache()
+            if any(_entry_contains(x, ip) for x in self._cache):
+                return True
+            new_list = self._cache + [ip]
+            try:
+                self._com_call(self._com_set_ips, new_list, list(ports))
+                self._cache = new_list
+                log.info("single rule: เพิ่ม %s (รวม %d IP)", ip, len(new_list))
+                return True
+            except Exception as exc:
+                log.warning("COM ล้มเหลว (%s) — ลอง netsh แทน", exc)
+            self._netsh(["delete", "rule", f"name={self.rule_prefix}"])
+            args = [
+                "add",
+                "rule",
+                f"name={self.rule_prefix}",
+                "dir=in",
+                "action=block",
+                f"remoteip={','.join(new_list)}",
+                f"profile={_PROFILE_ARG.get(self.profile, 'any')}",
+                "enable=yes",
+            ]
+            if ports:
+                args += ["protocol=TCP", "localport=" + ",".join(str(p) for p in ports)]
+            ok = self._netsh(args)
+            if ok:
+                self._cache = new_list
+            return ok
 
     def _add_block_netsh(self, ip, ports):
         profile = _PROFILE_ARG.get(self.profile, "any")
@@ -301,42 +310,43 @@ class FirewallManager:
             self._com_call(self._com_remove_legacy, ip)
         except Exception:
             pass
-        if self._cache is None:
-            self._sync_cache()
-        if not any(_entry_contains(x, ip) for x in self._cache):
+        with self._cache_lock:
+            if self._cache is None:
+                self._sync_cache()
+            if not any(_entry_contains(x, ip) for x in self._cache):
+                return True
+            new_list = [x for x in self._cache if not _entry_contains(x, ip)]
+            try:
+                if not new_list:
+                    self._com_call(self._com_delete_rule)
+                    self._cache = []
+                    log.info("single rule: ลบ %s — rule ว่าง ถูกลบ", ip)
+                else:
+                    self._com_call(self._com_set_ips, new_list, list(self.ports))
+                    self._cache = new_list
+                    log.info("single rule: ลบ %s (เหลือ %d IP)", ip, len(new_list))
+                return True
+            except Exception as exc:
+                log.warning("COM ล้มเหลว (%s) — ลอง netsh แทน", exc)
+            self._netsh(["delete", "rule", f"name={self.rule_prefix}"])
+            if new_list:
+                args = [
+                    "add",
+                    "rule",
+                    f"name={self.rule_prefix}",
+                    "dir=in",
+                    "action=block",
+                    f"remoteip={','.join(new_list)}",
+                    f"profile={_PROFILE_ARG.get(self.profile, 'any')}",
+                    "enable=yes",
+                ]
+                if self.ports:
+                    args += ["protocol=TCP", "localport=" + ",".join(str(p) for p in self.ports)]
+                ok = self._netsh(args)
+                if ok:
+                    self._cache = new_list
+                return ok
             return True
-        new_list = [x for x in self._cache if not _entry_contains(x, ip)]
-        try:
-            if not new_list:
-                self._com_call(self._com_delete_rule)
-                self._cache = []
-                log.info("single rule: ลบ %s — rule ว่าง ถูกลบ", ip)
-            else:
-                self._com_call(self._com_set_ips, new_list, list(self.ports))
-                self._cache = new_list
-                log.info("single rule: ลบ %s (เหลือ %d IP)", ip, len(new_list))
-            return True
-        except Exception as exc:
-            log.warning("COM ล้มเหลว (%s) — ลอง netsh แทน", exc)
-        self._netsh(["delete", "rule", f"name={self.rule_prefix}"])
-        if new_list:
-            args = [
-                "add",
-                "rule",
-                f"name={self.rule_prefix}",
-                "dir=in",
-                "action=block",
-                f"remoteip={','.join(new_list)}",
-                f"profile={_PROFILE_ARG.get(self.profile, 'any')}",
-                "enable=yes",
-            ]
-            if self.ports:
-                args += ["protocol=TCP", "localport=" + ",".join(str(p) for p in self.ports)]
-            ok = self._netsh(args)
-            if ok:
-                self._cache = new_list
-            return ok
-        return True
 
     def _remove_block_netsh(self, ip):
         ok = self._netsh(["delete", "rule", f"name={self._rule_name(ip)}"])
@@ -349,9 +359,10 @@ class FirewallManager:
     def rule_exists(self, ip):
         """ตรวจว่า IP อยู่ในรายการบล็อก (firewall) หรือไม่"""
         if self.single_rule:
-            if self._cache is None:
-                self._sync_cache()
-            return any(_entry_contains(x, ip) for x in self._cache)
+            with self._cache_lock:
+                if self._cache is None:
+                    self._sync_cache()
+                return any(_entry_contains(x, ip) for x in self._cache)
         try:
             return self._com_call(self._com_rule_exists, ip)
         except Exception:

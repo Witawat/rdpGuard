@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.5.5 (2026-08-16)
+
+- **พาเนล Session / Remote กลับมาทำงานครบทุกเครื่อง** — ลบ PowerShell CIM fallback (Norton Behavioral ฟลาก `powershell.exe` + embedded script base64 เป็น `IDP.HELU.PSE...` — pattern ที่ malware ใช้จริง) → เปลี่ยนเป็น **WTS API (win32ts)** ตรง ๆ แทน: เป็น DLL call ใน process ตัวเอง ไม่ spawn process ภายนอก — ใช้งานได้บนเครื่องที่ไม่มี `qwinsta` (Win11 บางรุ่น) และ Norton ไม่มีอะไรให้ฟลาก
+- ลำดับอ่าน session: `qwinsta` → `query session` → `win32ts.WTSEnumerateSessions` (แสดง user/ชนิด session/สถานะ Active-Disc)
+
+## 1.5.4 (2026-08-16)
+
+### แก้บั๊ก (Bug fix round — code review ทั่วระบบ)
+
+- **แก้ race ในโหมด single_rule** (firewall.py): `_cache` (รายการ IP ใน rule เดียว) ถูกแก้จากหลาย thread พร้อมกันโดยไม่มี lock → **lost update: IP หายจาก firewall ทั้งที่ DB บอก blocked** — เพิ่ม `_cache_lock` ครอบทุก add/remove/ตรวจ + `sync()` สำหรับ refresh จาก firewall จริง (reconcile ใช้ก่อนตรวจทุก 60 วิ — มองเห็น rule ที่ถูกรีเซ็ต/ลบจากภายนอกแล้วสร้างกลับ)
+- **แก้ race ใน Web UI** (webui.py): `_sessions` + `_login_guard` แก้ข้าม thread ไม่มี lock → `RuntimeError: dictionary changed size during iteration` (500) และตัวนับกันเดารหัสพลาด — เพิ่ม `threading.Lock`
+- **ความปลอดภัย**: `GET /api/settings` ไม่ส่ง `webui.password` ตัวจริงกลับอีกต่อไป (เหลือแค่ `password_hidden` แสดงสถานะ)
+- **config lost update**: `save_config` ย้ายเข้า `_cfg_lock` (save settings + toggle พร้อมกันไม่ทับค่ากันอีก) + เขียนไฟล์ fail → แจ้งข้อความชัดเจน
+- **blacklist เด็ดขาดขึ้น**: IP ใน blacklist ที่ล็อกอินสำเร็จจะ**ไม่ถูกปลดอัตโนมัติ** (ปลดด้วยมือเท่านั้น) — auto block ยังปลดตามปกติ
+- **unblock-all ปลอดภัยขึ้น**: ลบจาก DB เฉพาะที่ firewall ปลดได้จริง — ตัวที่ลบ fail จะยังอยู่ในตาราง + แจ้งเตือน
+- **monitor=None (โหมด `run.py web`)**: action handlers (block/unblock/whitelist/blacklist) คืน JSON error "monitor ไม่ได้รัน" แทน 500
+- **GeoIP**: จำกัด batch ต่อ request (20 IP) — request เดิมค้าง ~70 วิ ลดเหลือ ~7 วิ + JS กันขอซ้ำ IP เดียวกันระหว่างรอ (in-flight)
+- body JSON ที่ไม่ใช่ dict → จัดการเป็น `{}` (กัน 500) · `limit` ของ /api/events clamp 1-500 (กัน `LIMIT -1`)
+- **UI**: badge "สะสม"/"หมดอายุ" มีสี · `init()` ลองใหม่เมื่อ server ยังไม่พร้อม · fetch มี timeout จริง (AbortController — self-test button ไม่ค้าง) · การ์ดสถิติไม่แสดง "undefined" ในโหมด web-only · sessions โหลดทันทีหลังล็อกอิน · polling (events/blocked/log) กัน response เก่ามาเขียนทับของใหม่
+
 ## 1.5.3 (2026-08-16)
 
 - **Web UI หน้า ตั้งค่า**: จัดกลุ่มใหม่เป็น 2 คอลัมน์ — การเฝ้าระวัง / Windows Firewall / Web UI เรียงซ้อนกันฝั่งซ้าย, การตรวจจับ (กลุ่มยาว) อยู่ฝั่งขวากินความสูงเต็ม, Engine เพิ่มเติม เต็มแถวล่าง (จอแคบ <980px = เรียง 1 คอลัมน์ตามเดิม) + asset version bump

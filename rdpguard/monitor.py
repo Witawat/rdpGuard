@@ -98,6 +98,9 @@ class Monitor:
             if self.fw.remove_block(ip):
                 self.db.unblock_ip(ip, by="expire")
                 log.info("บล็อก IP %s หมดอายุ — ปลดบล็อกแล้ว", ip)
+        # refresh รายการ IP ใน single rule จาก firewall จริง ก่อน reconcile
+        # (กัน _cache เก่าค้างเมื่อ firewall ถูกรีเซ็ต/แก้จากภายนอก → มองไม่เห็นว่า rule หาย)
+        self.fw.sync()
         # ฉุกเฉิน: ปลดบล็อก IP ที่อยู่ใน whitelist / never_block_ips (กันล็อกตัวเอง)
         for row in self.db.list_blocked():
             ip = row["ip"]
@@ -120,15 +123,25 @@ class Monitor:
                 )
 
     def unblock_all(self):
-        """ปลดบล็อกทั้งหมด (ฉุกเฉิน) — คืนจำนวนที่ปลด"""
+        """ปลดบล็อกทั้งหมด (ฉุกเฉิน) — คืนจำนวนที่ปลดสำเร็จ (DB ถูกลบเฉพาะที่ firewall ปลดได้จริง)"""
         count = 0
+        failed = 0
         for row in self.db.list_blocked():
             ip = row["ip"]
             ok = self.fw.remove_block(ip)
-            self.db.unblock_ip(ip, by="unblock-all")
-            count += 1
-            log.warning("unblock-all: ปลดบล็อก IP %s (rule ลบ=%s)", ip, "OK" if ok else "FAIL")
-        return count
+            if ok:
+                self.db.unblock_ip(ip, by="unblock-all")
+                count += 1
+                log.warning("unblock-all: ปลดบล็อก IP %s (rule ลบ=OK)", ip)
+            else:
+                failed += 1
+                log.error(
+                    "unblock-all: ลบ rule firewall ของ %s ไม่สำเร็จ — ยังอยู่ในตาราง blocked",
+                    ip,
+                )
+        if failed:
+            return f"{count} IP ปลดแล้ว แต่ {failed} IP ลบ rule ไม่สำเร็จ (ตรวจสิทธิ์ admin/service แล้วลองใหม่)"
+        return f"ปลดบล็อกทั้งหมดแล้ว ({count} IP)"
 
     def allow_ip(self, ip):
         """เพิ่ม whitelist + ปลดบล็อกถ้าถูกบล็อกอยู่ (ฉุกเฉิน)"""

@@ -273,6 +273,12 @@ class BruteForceDetector:
             self._attempts.pop((source, ip), None)
         self.db.accumulate_reset(ip)
         row = self.db.is_blocked(ip)
+        if row and row.get("source") == "blacklist":
+            log.info(
+                "IP %s ล็อกอินสำเร็จ แต่ยังอยู่ใน blacklist — ไม่ปลด (แบนเด็ดขาด ปลดด้วยมือเท่านั้น)",
+                ip,
+            )
+            return
         if row:
             ok = self.fw.remove_block(ip)
             self.db.unblock_ip(ip, by="auto-login")

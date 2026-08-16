@@ -116,6 +116,8 @@ tr:hover td { background: var(--surface-2); }
 .badge.auto { background: var(--warn-soft); color: var(--warn); }
 .badge.manual { background: var(--accent-soft); color: var(--accent); }
 .badge.blacklist { background: var(--danger-soft); color: var(--danger); }
+.badge.accumulate { background: var(--accent-soft); color: var(--accent); }
+.badge.expire { background: var(--surface-2); color: var(--muted); }
 
 button, input, select {
   font-family: inherit; font-size: 0.85rem;

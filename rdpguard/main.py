@@ -194,8 +194,7 @@ def _cmd_unblock_all():
     config_mod.ensure_config()
     monitor = Monitor()
     try:
-        count = monitor.unblock_all()
-        print(f"OK: ปลดบล็อกทั้งหมดแล้ว ({count} IP)")
+        print("OK: " + monitor.unblock_all())
     finally:
         monitor.db.close()
 

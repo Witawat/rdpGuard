@@ -12,11 +12,22 @@ function toast(message, type = "") {
 }
 
 async function api(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    credentials: "same-origin",
-    ...options,
-  });
+  const { timeout, ...fetchOpts } = options;
+  const ctrl = timeout ? new AbortController() : null;
+  const timer = timeout ? setTimeout(() => ctrl.abort(), timeout) : null;
+  let res;
+  try {
+    res = await fetch(path, {
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      signal: ctrl ? ctrl.signal : undefined,
+      ...fetchOpts,
+    });
+  } catch (e) {
+    throw new Error("server ไม่ตอบกลับ (timeout/ตัดการเชื่อมต่อ) — ลองอีกครั้ง");
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   let data = {};
   try {
     data = await res.json();
@@ -59,11 +70,16 @@ function engineBadge(source) {
 /* ---------- views ---------- */
 
 async function init() {
-  const status = await api("/api/login-status");
-  if (status.data.authorized) {
-    showApp();
-  } else {
-    showLogin();
+  try {
+    const status = await api("/api/login-status");
+    if (status.data.authorized) {
+      showApp();
+    } else {
+      showLogin();
+    }
+  } catch (e) {
+    // server ยังไม่พร้อม (กำลัง restart) — ลองใหม่เรื่อย ๆ
+    setTimeout(init, 2000);
   }
 }
 
@@ -88,6 +104,7 @@ function showApp() {
   refreshLists();
   refreshSettings();
   refreshLog();
+  refreshSessions();
   appIntervals.push(setInterval(refreshOverview, 3000));
   appIntervals.push(setInterval(refreshEvents, 3000));
   appIntervals.push(setInterval(refreshBlocked, 5000));
@@ -159,19 +176,21 @@ document.addEventListener("click", async (e) => {
 /* ---------- geoip ---------- */
 
 const geoCache = {};
+const geoInFlight = {};  // กันขอซ้ำ IP เดียวกันตอน request ก่อนยังไม่เสร็จ
 
 async function fillCountry(rows, ipGetter, tdIndex, tableId) {
   const missing = [];
   for (const row of rows) {
     const ip = ipGetter(row);
-    if (ip && !(ip in geoCache)) missing.push(ip);
+    if (ip && !(ip in geoCache) && !geoInFlight[ip]) missing.push(ip);
   }
-  let data = {};
   if (missing.length) {
+    missing.forEach((ip) => (geoInFlight[ip] = true));
     try {
-      data = (await api("/api/geoip", { method: "POST", body: JSON.stringify({ ips: missing }) })).data.geoip || {};
+      const { data } = await api("/api/geoip", { method: "POST", body: JSON.stringify({ ips: missing }) });
+      for (const [ip, info] of Object.entries(data.geoip || {})) geoCache[ip] = info || null;
     } catch (e) {}
-    for (const [ip, info] of Object.entries(data)) geoCache[ip] = info || null;
+    missing.forEach((ip) => delete geoInFlight[ip]);
   }
   rows.forEach((row) => {
     const ip = ipGetter(row);
@@ -380,10 +399,11 @@ $("logout-btn").addEventListener("click", async (e) => {
 async function refreshOverview() {
   try {
     const { data } = await api("/api/overview");
-    $("stat-failed").textContent = data.stats.failed_24h;
-    $("stat-success").textContent = data.stats.success_24h;
-    $("stat-active").textContent = data.stats.blocked_active;
-    $("stat-total").textContent = data.stats.blocked_total;
+    const s = data.stats || {};
+    $("stat-failed").textContent = s.failed_24h ?? 0;
+    $("stat-success").textContent = s.success_24h ?? 0;
+    $("stat-active").textContent = s.blocked_active ?? 0;
+    $("stat-total").textContent = s.blocked_total ?? 0;
     $("stat-rule-desc").textContent =
       `max ${data.settings_summary.max_attempts} ครั้ง / ${data.settings_summary.window_minutes} นาที / ${data.settings_summary.block_hours} ชม.`;
 
@@ -514,9 +534,13 @@ $("selftest-btn").addEventListener("click", async () => {
 
 /* ---------- events ---------- */
 
+let _eventsSeq = 0;
+
 async function refreshEvents() {
+  const seq = ++_eventsSeq;
   try {
     const { data } = await api("/api/events?limit=80");
+    if (seq !== _eventsSeq) return;  // มี request ใหม่กว่าแล้ว — อย่าเขียนทับข้อมูลใหม่ด้วยของเก่า
     const tbody = $("events-table").querySelector("tbody");
     tbody.innerHTML = "";
     $("events-count").textContent = `${data.events.length} เหตุการณ์ล่าสุด`;
@@ -538,9 +562,13 @@ async function refreshEvents() {
 
 /* ---------- blocked ---------- */
 
+let _blockedSeq = 0;
+
 async function refreshBlocked() {
+  const seq = ++_blockedSeq;
   try {
     const { data } = await api("/api/blocked");
+    if (seq !== _blockedSeq) return;
     const tbody = $("blocked-table").querySelector("tbody");
     tbody.innerHTML = "";
     $("blocked-empty").style.display = data.blocked.length ? "none" : "";
@@ -709,9 +737,13 @@ document.addEventListener("click", async (e) => {
 
 /* ---------- log ---------- */
 
+let _logSeq = 0;
+
 async function refreshLog() {
+  const seq = ++_logSeq;
   try {
     const { data } = await api("/api/log?lines=250");
+    if (seq !== _logSeq) return;
     const view = $("log-view");
     const nearBottom = view.scrollHeight - view.scrollTop - view.clientHeight < 80;
     view.textContent = data.lines.length ? data.lines.join("\n") : "(log ว่างเปล่า)";
