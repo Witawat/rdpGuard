@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.0 (2026-08-16)
+
+- **ตัวนับสะสม (ยิงสั้น ๆ แล้วหนี)**: นับความล้มเหลวสะสมต่อ IP ภายในกรอบเวลายาว (`accumulate_window_hours` ค่าเริ่มต้น 24 ชม.) — แยกจากตัวนับ window ระยะสั้นที่รีเซ็ตทุกกรอบ — IP ที่ยิงทีละ 1-2 ครั้งไม่ถึงเกณฑ์ short-window แต่สะสมครบ `accumulate_threshold` (ค่าเริ่มต้น 8) จะโดนบล็อกด้วย `accumulate_block_hours` (ค่าเริ่มต้น 6 ชม. — สั้นกว่าปกติ กันพลาดบล็อกผู้ใช้หลัง NAT/ISP shared)
+- ตัวนับสะสมเคารพ whitelist/`never_block_ips`/grace 30 นาที (มี session ล็อกอินสำเร็จจริงไม่บล็อก + ล้างตัวนับทันที) — ล็อกอินสำเร็จ = ล้างตัวนับสะสมให้ IP นั้น
+- ตัวนับสะสมรันเฉพาะเมื่อ short-window ยังไม่บล็อก (กันเกณฑ์ทั้งคู่ชนกันแล้ว expires ถูกทับ) — บล็อกสะสมที่ยังโจมตีต่อจะต่ออายุด้วย `accumulate_block_hours` (ไม่ใช่ `block_hours`)
+- ตัวนับเก็บใน DB (ตาราง `accumulate`) — ไม่เสียสถิติตอน restart; cleanup ลบ entry ที่เงียบเกินกรอบเวลาทุก 60 วิ
+- Web UI: ตั้งค่าได้ในหน้า ตั้งค่า → การตรวจจับ (3 ช่องใหม่) + badge "สะสม" ในตาราง IP ถูกบล็อก + asset version bump
+
 ## 1.4.2 (2026-08-16)
 
 - **โหมด rule เดียวแบบ RDPGuard** (`firewall.single_rule = true` ค่าเริ่มต้น) — Windows Firewall มี rule เดียวชื่อ `RDPGuard Block` แล้วเพิ่ม/ลบ IP ในรายการ RemoteAddresses ตาม IP ที่โจมตี (ไม่สร้าง rule ต่อ IP) — ตั้งค่าได้ที่หน้า ตั้งค่า → Windows Firewall

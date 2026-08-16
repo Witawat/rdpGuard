@@ -55,8 +55,15 @@ CREATE TABLE IF NOT EXISTS geoip_cache(
     country TEXT DEFAULT '',
     ts TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS accumulate(
+    ip TEXT PRIMARY KEY,
+    count INTEGER NOT NULL DEFAULT 1,
+    first_ts TEXT NOT NULL,
+    last_ts TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 CREATE INDEX IF NOT EXISTS idx_blocked_history_created ON blocked_history(created);
+CREATE INDEX IF NOT EXISTS idx_accumulate_last_ts ON accumulate(last_ts);
 """
 
 
@@ -242,6 +249,44 @@ class Database:
             (ip, since_iso),
         )
         return row[0]["n"]
+
+    # ---- ตัวนับสะสม (ยิงสั้น ๆ แล้วหนี) ----
+
+    def accumulate_add(self, ip):
+        """เพิ่มตัวนับสะสมของ IP — คืนจำนวนรวมใหม่ (row เก่าที่เงียบเกิน window ลบโดย cleanup)"""
+        now = _now_iso()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT count, first_ts FROM accumulate WHERE ip=?", (ip,)
+            ).fetchone()
+            if row:
+                new_count = row[0] + 1
+                self._conn.execute(
+                    "UPDATE accumulate SET count=?, last_ts=? WHERE ip=?",
+                    (new_count, now, ip),
+                )
+            else:
+                new_count = 1
+                self._conn.execute(
+                    "INSERT INTO accumulate(ip, count, first_ts, last_ts) VALUES(?,?,?,?)",
+                    (ip, new_count, now, now),
+                )
+            self._conn.commit()
+        return new_count
+
+    def accumulate_reset(self, ip):
+        """ล้างตัวนับสะสม (เช่น IP ล็อกอินสำเร็จ — ผู้ใช้จริงกลับมาแล้ว)"""
+        self._execute("DELETE FROM accumulate WHERE ip=?", (ip,))
+
+    def accumulate_cleanup(self, window_hours):
+        """ลบตัวนับสะสมที่เงียบเกินกรอบเวลา (ชั่วโมง) — คืนจำนวนที่ลบ"""
+        if window_hours <= 0:
+            return 0
+        since = (datetime.now(timezone.utc) - timedelta(hours=window_hours)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        cur = self._execute("DELETE FROM accumulate WHERE last_ts < ?", (since,))
+        return cur.rowcount
 
     def add_whitelist(self, ip, note=""):
         try:

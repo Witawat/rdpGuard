@@ -40,8 +40,13 @@ config เก็บที่:
 | `escalate_block_hours` | `168` | ขยายเป็นกี่ชั่วโมง (ค่าเริ่มต้น 7 วัน) |
 | `escalate_to_permanent` | `false` | ขยายเป็นบล็อกถาวรเลย (แทน `escalate_block_hours`) — ต้องปลดด้วยมือ |
 | `escalation_window_days` | `30` | กรอบเวลานับจำนวนครั้งที่โดนบล็อก (วัน) |
+| `accumulate_window_hours` | `24` | **ตัวนับสะสม (ยิงสั้น ๆ แล้วหนี)**: นับความล้มเหลวสะสมต่อ IP ภายในกรอบเวลายาว (ชั่วโมง) — แยกจาก `window_minutes` ที่รีเซ็ตทุกกรอบ `0` = ปิด |
+| `accumulate_threshold` | `8` | ครบกี่ครั้ง (รวมภายใน `accumulate_window_hours`) ถึงจะบล็อก `0` = ปิด |
+| `accumulate_block_hours` | `6` | บล็อกนานเท่าไรสำหรับกรณีสะสม (ชั่วโมง) — ตั้งสั้นกว่า `block_hours` กันพลาดบล็อกผู้ใช้หลัง NAT/ISP shared; IP ขาประจำจะโดน escalate ต่อเอง |
 
-> หมายเหตุ: auto_extend (ต่ออายุบล็อก) จะ**ไม่ลด**ระยะเวลาบล็อกที่ขยายแล้ว และ**ไม่แตะ**บล็อกถาวร
+> หมายเหตุ: auto_extend (ต่ออายุบล็อก) จะ**ไม่ลด**ระยะเวลาบล็อกที่ขยายแล้ว และ**ไม่แตะ**บล็อกถาวร — IP ที่ถูกบล็อกจากตัวนับสะสม (source = `accumulate`) จะต่ออายุด้วย `accumulate_block_hours` (ไม่ใช่ `block_hours`)
+>
+> หมายเหตุ: ตัวนับสะสมเคารพ whitelist/`never_block_ips`/grace (`active_session_grace_minutes`) — IP ที่ล็อกอินสำเร็จจะถูก**ล้างตัวนับ**ทันที; counter เก็บใน DB และ cleanup ลบ entry ที่เงียบเกินกรอบเวลาอัตโนมัติ
 
 ## [engines]
 
@@ -91,3 +96,4 @@ Engine เพิ่มเติม (engine RDP/Security เปิดถาวร
 | RDP มีคนใช้จริงหลายคน | `max_attempts = 8–10`, `window_minutes = 15` (ลดการบล็อกผู้ใช้ที่พิมพ์รหัสผิดเป็นครั้งคราว) |
 | ต้องการกันระยะยาว | `block_hours = 72` หรือ `0` (ถาวร) + `auto_extend = true` |
 | Office ใช้ IP ปลายทางคงที่ | เพิ่ม IP นั้นใน **Whitelist** ผ่าน Web UI |
+| เจอ "ยิงสั้น ๆ แล้วหนี" (IP แทบไม่ซ้ำ ทีละ 1-2 ครั้ง) | `accumulate_threshold = 5`, `accumulate_window_hours = 24` (สะสมครบ 5 ครั้ง/วัน โดนบล็อก 6 ชม.) — ถ้า network มี NAT/ISP shared เยอะ เก็บค่าเริ่มต้นไว้ |

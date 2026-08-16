@@ -630,6 +630,7 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
 
         ok_unblock, msg_unblock = _monitor.manual_unblock(test_ip)
         _monitor.db.delete_events_by_user("selftest")
+        _monitor.db.accumulate_reset(test_ip)
         steps.append(f"ปลดบล็อก + ลบ event ทดสอบ — {'OK' if ok_unblock else 'FAIL'}")
 
         working = rule_ok and ok_unblock
@@ -792,6 +793,9 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
                 "escalate_block_hours",
                 "escalate_to_permanent",
                 "escalation_window_days",
+                "accumulate_window_hours",
+                "accumulate_threshold",
+                "accumulate_block_hours",
             },
             "firewall": {"rule_prefix", "profile", "blocked_ports", "single_rule"},
             "webui": {"host", "port", "password"},

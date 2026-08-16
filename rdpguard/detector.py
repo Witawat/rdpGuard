@@ -215,19 +215,54 @@ class BruteForceDetector:
             count,
             window_minutes,
         )
-        if count < max_attempts:
+        if count >= max_attempts:
+            grace = config_mod.get_int(parser, "detection", "active_session_grace_minutes", 30)
+            if grace > 0 and self.db.recent_success(ip, grace):
+                log.warning(
+                    "ข้ามการบล็อก IP %s — มี session ล็อกอินสำเร็จภายใน %d นาที (ป้องกันผู้ดูแลถูกล็อก)",
+                    ip,
+                    grace,
+                )
+                with self._lock:
+                    self._attempts.pop(key, None)
+                return
+            self._do_block(parser, ip, "auto", source)
             return
-        grace = config_mod.get_int(parser, "detection", "active_session_grace_minutes", 30)
-        if grace > 0 and self.db.recent_success(ip, grace):
-            log.warning(
-                "ข้ามการบล็อก IP %s — มี session ล็อกอินสำเร็จภายใน %d นาที (ป้องกันผู้ดูแลถูกล็อก)",
+
+        # ตัวนับสะสม: รันเฉพาะตอนที่ short-window ยังไม่บล็อก (กันเกณฑ์ทั้งคู่ชนกันใน event เดียว
+        # → บล็อกทับ/ขยายซ้อนด้วย _maybe_extend)
+        self._accumulate_bump(parser, ip, source)
+
+    def _accumulate_bump(self, parser, ip, engine="rdp"):
+        """ตัวนับสะสม: บวก 1 ต่อ IP (ข้าม engine) ภายใน accumulate_window_hours —
+        ครบ accumulate_threshold → บล็อกด้วย accumulate_block_hours
+        (กันกลยุทธ์ยิงสั้น ๆ แล้วหนี ที่ไม่ถึงเกณฑ์ window ระยะสั้น)"""
+        from . import config as config_mod
+
+        win = config_mod.get_int(parser, "detection", "accumulate_window_hours", 0)
+        threshold = config_mod.get_int(parser, "detection", "accumulate_threshold", 0)
+        if win <= 0 or threshold <= 0:
+            return
+        count = self.db.accumulate_add(ip)
+        if count >= threshold:
+            grace = config_mod.get_int(parser, "detection", "active_session_grace_minutes", 30)
+            if grace > 0 and self.db.recent_success(ip, grace):
+                self.db.accumulate_reset(ip)
+                log.warning(
+                    "ข้ามบล็อกสะสม IP %s (สะสม %d ครั้ง) — มี session ล็อกอินสำเร็จ ผู้ใช้จริงกลับมาแล้ว",
+                    ip,
+                    count,
+                )
+            else:
+                self._do_block(parser, ip, "accumulate", engine)
+        else:
+            log.info(
+                "ตัวนับสะสม: IP %s สะสม %d/%d ครั้งใน %d ชม.",
                 ip,
-                grace,
+                count,
+                threshold,
+                win,
             )
-            with self._lock:
-                self._attempts.pop(key, None)
-            return
-        self._do_block(parser, ip, "auto", source)
 
     def handle_success(self, item):
         ip = item.get("ip", "-")
@@ -236,6 +271,7 @@ class BruteForceDetector:
         source = str(item.get("source") or "rdp")
         with self._lock:
             self._attempts.pop((source, ip), None)
+        self.db.accumulate_reset(ip)
         row = self.db.is_blocked(ip)
         if row:
             ok = self.fw.remove_block(ip)
@@ -254,7 +290,10 @@ class BruteForceDetector:
         row = self.db.is_blocked(ip)
         if not row:
             return
-        hours = config_mod.get_int(parser, "detection", "block_hours", 24)
+        if row.get("source") == "accumulate":
+            hours = config_mod.get_int(parser, "detection", "accumulate_block_hours", 6)
+        else:
+            hours = config_mod.get_int(parser, "detection", "block_hours", 24)
         if hours <= 0:
             return
         new_expiry = _now_utc() + timedelta(hours=hours)
@@ -274,8 +313,6 @@ class BruteForceDetector:
     def _do_block(self, parser, ip, source, engine="rdp"):
         from . import config as config_mod
 
-        hours = config_mod.get_int(parser, "detection", "block_hours", 24)
-        expires = _iso(_now_utc() + timedelta(hours=hours)) if hours > 0 else ""
         prefix = config_mod.get(parser, "firewall", "rule_prefix", "RDPGuard Block")
         ports = config_mod.get(parser, "firewall", "blocked_ports", "").strip()
         rule_name = f"{prefix} {ip}"
@@ -285,7 +322,14 @@ class BruteForceDetector:
             self._maybe_extend(parser, ip)
             return
 
-        reason = f"ล็อกอิน {label} ล้มเหลวเกินกำหนด ({source})"
+        if source == "accumulate":
+            hours = config_mod.get_int(parser, "detection", "accumulate_block_hours", 6)
+            expires = _iso(_now_utc() + timedelta(hours=hours)) if hours > 0 else ""
+            reason = f"สะสมล็อกอิน {label} ล้มเหลวเกินกำหนด ({source}) — ยิงสั้น ๆ ซ้ำ"
+        else:
+            hours = config_mod.get_int(parser, "detection", "block_hours", 24)
+            expires = _iso(_now_utc() + timedelta(hours=hours)) if hours > 0 else ""
+            reason = f"ล็อกอิน {label} ล้มเหลวเกินกำหนด ({source})"
 
         if source == "auto":
             escalate_after = config_mod.get_int(parser, "detection", "escalate_after_blocks", 3)

@@ -46,7 +46,7 @@ function typeBadge(kind) {
 }
 
 function sourceBadge(source) {
-  const map = { auto: "อัตโนมัติ", manual: "ด้วยมือ", blacklist: "blacklist", expire: "หมดอายุ" };
+  const map = { auto: "อัตโนมัติ", manual: "ด้วยมือ", blacklist: "blacklist", accumulate: "สะสม", expire: "หมดอายุ" };
   return `<span class="badge ${source}">${map[source] || source}</span>`;
 }
 
@@ -747,6 +747,9 @@ const SETTINGS_UI = {
       { key: "escalate_block_hours", label: "ขยายเป็นกี่ชั่วโมง (ค่าเริ่มต้น 168)", type: "int" },
       { key: "escalate_to_permanent", label: "ขยายเป็นบล็อกถาวร (แทนชั่วโมง)", type: "bool" },
       { key: "escalation_window_days", label: "กรอบเวลานับครั้ง (วัน)", type: "int" },
+      { key: "accumulate_window_hours", label: "ตัวนับสะสม: กรอบเวลา (ชั่วโมง, 0=ปิด)", type: "int" },
+      { key: "accumulate_threshold", label: "ตัวนับสะสม: ครบกี่ครั้งถึงบล็อก (0=ปิด)", type: "int" },
+      { key: "accumulate_block_hours", label: "ตัวนับสะสม: บล็อกนาน (ชั่วโมง)", type: "int" },
     ],
   },
   firewall: {

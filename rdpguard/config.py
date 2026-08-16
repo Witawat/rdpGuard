@@ -113,6 +113,15 @@ escalate_block_hours = 168
 escalate_to_permanent = false
 ; กรอบเวลานับจำนวนครั้งที่โดนบล็อก (วัน)
 escalation_window_days = 30
+; --- ตัวนับสะสม (ไล่กลยุทธ์ "ยิงสั้น ๆ แล้วหนี") ---
+; นับความล้มเหลวสะสมต่อ IP ภายในกรอบเวลายาว (ชั่วโมง) — แยกจาก window_minutes
+; ที่รีเซ็ตทุกกรอบเวลา; 0 = ปิดตัวนับสะสม
+accumulate_window_hours = 24
+; ครบกี่ครั้ง (รวมภายในกรอบเวลานั้น) ถึงจะบล็อก — 0 = ปิด
+accumulate_threshold = 8
+; บล็อกนานเท่าไรสำหรับกรณีสะสม (ชั่วโมง) — ตั้งสั้นกว่า block_hours
+; กันพลาดบล็อกผู้ใช้หลัง NAT/ISP shared; IP ขาประจำจะโดน escalate ต่อเอง
+accumulate_block_hours = 6
 
 [engines]
 ; Engine เพิ่มเติม (security/RDP เปิดถาวร) — เปิด/ปิดแต่ละตัวได้

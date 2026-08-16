@@ -89,6 +89,9 @@ class Monitor:
                 log.exception("cleanup ล้มเหลว")
 
     def _cleanup_once(self):
+        self.db.accumulate_cleanup(
+            config_mod.get_int(self.cfg, "detection", "accumulate_window_hours", 0)
+        )
         expired = self.db.expired_blocks()
         for row in expired:
             ip = row["ip"]
