@@ -44,6 +44,8 @@ def _print_help():
     print(f"  {cmd} web              # รันเฉพาะ web UI")
     print(f"  {cmd} block 1.2.3.4 24 # บล็อก IP ด้วยมือ")
     print(f"  {cmd} unblock 1.2.3.4  # ปลดบล็อก IP")
+    print(f"  {cmd} unblock-all     # ปลดบล็อกทุก IP (ฉุกเฉิน ถูกล็อกตัวเอง)")
+    print(f"  {cmd} allow 1.2.3.4   # เพิ่ม whitelist + ปลดบล็อก (ฉุกเฉิน)")
     print(f"  {cmd} password         # ดูรหัสผ่าน Web UI")
     print(f"  {cmd} password reset   # สุ่มรหัสผ่านใหม่")
     print(f"  {cmd} version          # แสดงเวอร์ชัน")
@@ -148,10 +150,14 @@ def _cmd_web(open_browser=True):
 
 def _cmd_block(args):
     if not args:
-        print("ใช้งาน: python -m rdpguard block <ip> [ชั่วโมง]")
+        print("ใช้งาน: python -m rdpguard block <ip/cidr> [ชั่วโมง]")
         return
     ip = args[0]
-    hours = int(args[1]) if len(args) > 1 else 24
+    try:
+        hours = int(args[1]) if len(args) > 1 else 24
+    except ValueError:
+        print("ชั่วโมงต้องเป็นตัวเลข")
+        return
     from . import config as config_mod
     from .monitor import Monitor
 
@@ -176,6 +182,36 @@ def _cmd_unblock(args):
     monitor = Monitor()
     try:
         ok, message = monitor.manual_unblock(ip)
+        print(("OK: " if ok else "FAIL: ") + message)
+    finally:
+        monitor.db.close()
+
+
+def _cmd_unblock_all():
+    from . import config as config_mod
+    from .monitor import Monitor
+
+    config_mod.ensure_config()
+    monitor = Monitor()
+    try:
+        count = monitor.unblock_all()
+        print(f"OK: ปลดบล็อกทั้งหมดแล้ว ({count} IP)")
+    finally:
+        monitor.db.close()
+
+
+def _cmd_allow(args):
+    if not args:
+        print("ใช้งาน: python -m rdpguard allow <ip/cidr>")
+        return
+    ip = args[0]
+    from . import config as config_mod
+    from .monitor import Monitor
+
+    config_mod.ensure_config()
+    monitor = Monitor()
+    try:
+        ok, message = monitor.allow_ip(ip)
         print(("OK: " if ok else "FAIL: ") + message)
     finally:
         monitor.db.close()
@@ -221,6 +257,10 @@ def main(argv=None):
         _cmd_block(rest)
     elif cmd == "unblock":
         _cmd_unblock(rest)
+    elif cmd == "unblock-all":
+        _cmd_unblock_all()
+    elif cmd == "allow":
+        _cmd_allow(rest)
     elif cmd == "password":
         _cmd_password(rest)
     elif cmd == "version":

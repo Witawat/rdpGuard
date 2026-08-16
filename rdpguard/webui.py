@@ -29,7 +29,27 @@ _LOGIN_MAX_FAILS = 5
 _LOGIN_LOCK_SECONDS = 300
 _login_guard = {"fails": 0, "locked_until": 0.0}
 
-_session_token = None
+_SESSION_MAX_AGE = 24 * 3600
+_sessions = {}  # token -> expires (epoch)
+
+
+def _new_session():
+    _cleanup_sessions()
+    token = secrets.token_urlsafe(32)
+    _sessions[token] = time.time() + _SESSION_MAX_AGE
+    return token
+
+
+def _cleanup_sessions():
+    now = time.time()
+    for token in [t for t, exp in _sessions.items() if exp <= now]:
+        _sessions.pop(token, None)
+
+
+def _invalidate_all_sessions():
+    _sessions.clear()
+
+
 _monitor = None
 _cfg_lock = threading.Lock()
 
@@ -137,6 +157,17 @@ def _health_data():
     }
 
 
+class RDPGuardHTTPServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer ที่เงียบต่อการตัดการเชื่อมต่อจาก client (F5/ปิดแท็บ)"""
+
+    def handle_error(self, request, client_address):
+        exc = sys.exc_info()[1]
+        if isinstance(exc, ConnectionError) or isinstance(exc, BrokenPipeError):
+            log.debug("client ตัดการเชื่อมต่อ: %s (%s)", client_address, exc)
+            return
+        super().handle_error(request, client_address)
+
+
 class RDPGuardHandler(BaseHTTPRequestHandler):
     server_version = f"RDPGuard/{__version__}"
     protocol_version = "HTTP/1.1"
@@ -146,14 +177,20 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
 
     def handle_error(self, request, client_address):
         exc = sys.exc_info()[1]
-        if isinstance(exc, (ConnectionResetError, BrokenPipeError)):
-            log.debug("client ตัดการเชื่อมต่อ: %s", client_address)
+        if isinstance(exc, ConnectionError) or isinstance(exc, BrokenPipeError):
+            log.debug("client ตัดการเชื่อมต่อ: %s (%s)", client_address, exc)
             return
         super().handle_error(request, client_address)
 
     def _read_body(self):
-        length = int(self.headers.get("Content-Length", 0) or 0)
+        try:
+            length = int(self.headers.get("Content-Length", 0) or 0)
+        except (TypeError, ValueError):
+            length = 0
         if length <= 0:
+            return {}
+        if length > 1024 * 1024:
+            log.warning("body ใหญ่เกินกำหนด (%d bytes) — ปฏิเสธ", length)
             return {}
         raw = self.rfile.read(length)
         try:
@@ -170,9 +207,14 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
         return None
 
     def _authorized(self):
-        if _session_token is None:
+        token = self._cookie_value("rdpguard_session") or ""
+        if not token:
             return False
-        return secrets.compare_digest(self._cookie_value("rdpguard_session") or "", _session_token)
+        expires = _sessions.get(token)
+        if not expires or expires <= time.time():
+            _sessions.pop(token, None)
+            return False
+        return True
 
     def _require_auth(self):
         if not self._authorized():
@@ -273,6 +315,12 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
         elif path == "/api/health/test-firewall":
             if self._require_auth():
                 self._handle_test_firewall()
+        elif path == "/api/unblock-all":
+            if self._require_auth():
+                self._handle_unblock_all()
+        elif path == "/api/self-test":
+            if self._require_auth():
+                self._handle_self_test()
         else:
             _json_error(self, "ไม่พบเส้นทาง", status=404)
 
@@ -303,15 +351,14 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
         expected = config_mod.get(cfg, "webui", "password", "")
         given = str(body.get("password", ""))
         if expected and secrets.compare_digest(given, expected):
-            global _session_token
-            _session_token = secrets.token_urlsafe(32)
+            token = _new_session()
             _login_guard["fails"] = 0
             _json_ok(
                 self,
-                {"token": _session_token},
+                {"token": token},
                 headers={
                     "Set-Cookie": (
-                        f"rdpguard_session={_session_token}; Path=/; "
+                        f"rdpguard_session={token}; Path=/; Max-Age={_SESSION_MAX_AGE}; "
                         "HttpOnly; SameSite=Lax"
                     )
                 },
@@ -326,8 +373,9 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
         _json_error(self, "รหัสไม่ถูกต้อง", status=401)
 
     def _handle_logout(self):
-        global _session_token
-        _session_token = None
+        token = self._cookie_value("rdpguard_session") or ""
+        if token:
+            _sessions.pop(token, None)
         _json_ok(
             self,
             {"message": "ออกจากระบบแล้ว"},
@@ -357,6 +405,122 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
             },
         }
         _json_ok(self, data)
+
+    def _handle_unblock_all(self):
+        """ฉุกเฉิน: ปลดบล็อกทุก IP (ลบ rule firewall ทั้งหมดของ RDPGuard)"""
+        if not _monitor:
+            _json_error(self, "monitor ไม่ได้รัน")
+            return
+        count = _monitor.unblock_all()
+        _json_ok(self, {"message": f"ปลดบล็อกทั้งหมดแล้ว ({count} IP)"})
+
+    def _handle_self_test(self):
+        """Self-test ครบวงจร: เขียน event จำลอง (18456) ลง Application log จริง →
+        engine อ่าน → detector บล็อก IP จำลอง → ตรวจ rule firewall → ปลดบล็อก + ทำความสะอาด"""
+        import time
+
+        import win32evtlog
+
+        if not _monitor:
+            _json_error(self, "monitor ไม่ได้รัน")
+            return
+        if not (_is_admin() or _in_service()):
+            _json_error(
+                self,
+                "self-test ต้องรันด้วยสิทธิ์ admin (หรือ service) — เปิดโปรแกรมด้วย Run as administrator",
+                status=403,
+            )
+            return
+        cfg = config_mod.load_config()
+        if not config_mod.get_bool(cfg, "monitor", "enable", True):
+            _json_error(self, "การเฝ้าระวังถูกปิดอยู่ — เปิดก่อน (สวิตช์ในหน้า การตรวจจับ)")
+            return
+        if not config_mod.get_bool(cfg, "engines", "mssql", True):
+            _json_error(self, "engine MSSQL ถูกปิดอยู่ — self-test ใช้ engine นี้ (เปิดในหน้า การตรวจจับ)")
+            return
+
+        max_attempts = config_mod.get_int(cfg, "detection", "max_attempts", 5)
+        override = config_mod.get(cfg, "engines", "mssql_max_attempts", "").strip()
+        if override:
+            try:
+                max_attempts = int(override)
+            except ValueError:
+                pass
+        if max_attempts > 50:
+            _json_error(self, f"max_attempts ({max_attempts}) สูงเกินไปสำหรับ self-test (ตั้ง ≤50 ก่อน)")
+            return
+
+        test_ip = "8.8.8.8"  # public IP ปลอดภัยสำหรับทดสอบ (rule เพิ่ม-ลบภายในไม่กี่วินาที)
+        steps = []
+
+        try:
+            handle = win32evtlog.RegisterEventSource(None, "Application")
+            try:
+                for i in range(max_attempts):
+                    msg = (
+                        f"RDPGuard selftest {i}: Login failed for user 'selftest'. "
+                        f"Reason: selftest. [CLIENT: {test_ip}]"
+                    )
+                    win32evtlog.ReportEvent(
+                        handle,
+                        win32evtlog.EVENTLOG_INFORMATION_TYPE,
+                        0,
+                        18456,
+                        None,
+                        [msg],
+                        None,
+                    )
+            finally:
+                win32evtlog.DeregisterEventSource(handle)
+            steps.append(f"เขียน event จำลอง {max_attempts} รายการ (Event 18456) ลง Application log — OK")
+        except Exception as exc:
+            _json_error(self, f"เขียน event log ไม่สำเร็จ: {exc}")
+            return
+
+        blocked = False
+        deadline = time.time() + 25
+        while time.time() < deadline:
+            if _monitor.db.is_blocked(test_ip):
+                blocked = True
+                break
+            time.sleep(1)
+        if not blocked:
+            _monitor.db.delete_events_by_user("selftest")
+            steps.append("เครื่องตรวจจับไม่เห็น/ไม่บล็อก IP จำลองภายใน 25 วิ — FAIL")
+            _json_ok(
+                self,
+                {
+                    "working": False,
+                    "steps": steps,
+                    "message": "self-test ล้มเหลว: engine ไม่บล็อก IP จำลอง (ดู log)",
+                },
+            )
+            return
+        steps.append(f"engine MSSQL อ่าน event → detector บล็อก {test_ip} อัตโนมัติ — OK")
+
+        rule_ok = _monitor.fw.rule_exists(test_ip)
+        steps.append(
+            f"ตรวจ rule \"RDPGuard Block {test_ip}\" ใน Windows Firewall — "
+            + ("OK" if rule_ok else "FAIL (rule ไม่เจอ)")
+        )
+
+        ok_unblock, msg_unblock = _monitor.manual_unblock(test_ip)
+        _monitor.db.delete_events_by_user("selftest")
+        steps.append(f"ปลดบล็อก + ลบ event ทดสอบ — {'OK' if ok_unblock else 'FAIL'}")
+
+        working = rule_ok and ok_unblock
+        _json_ok(
+            self,
+            {
+                "working": working,
+                "steps": steps,
+                "message": (
+                    "✅ self-test ผ่านครบวงจร: event log → ตรวจจับ → บล็อก → rule firewall → ปลดบล็อก ทำงานได้จริง"
+                    if working
+                    else "self-test มีบางขั้น FAIL (ดูขั้นตอน)"
+                ),
+            },
+        )
 
     def _handle_test_firewall(self):
         """ทดสอบบล็อกจริง: เพิ่ม rule ทดสอบ (TEST-NET 203.0.113.254) แล้วลบทิ้งทันที"""
@@ -478,6 +642,7 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
     def _handle_save_settings(self, body):
         with _cfg_lock:
             cfg = config_mod.load_config()
+            old_password = config_mod.get(cfg, "webui", "password", "")
             allowed_sections = {"monitor", "detection", "firewall", "webui", "engines"}
         allowed_keys = {
             "monitor": {"enable", "poll_interval_seconds", "logon_types"},
@@ -487,6 +652,12 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
                 "block_hours",
                 "auto_extend",
                 "skip_local_ips",
+                "active_session_grace_minutes",
+                "never_block_ips",
+                "escalate_after_blocks",
+                "escalate_block_hours",
+                "escalate_to_permanent",
+                "escalation_window_days",
             },
             "firewall": {"rule_prefix", "profile", "blocked_ports"},
             "webui": {"host", "port", "password"},
@@ -520,7 +691,14 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             _json_error(self, f"บันทึก config ไม่สำเร็จ: {exc}")
             return
+        password_changed = False
+        if "webui" in body and isinstance(body.get("webui"), dict):
+            new_pw = str(body["webui"].get("password", "")).strip()
+            if new_pw and new_pw != old_password:
+                password_changed = True
         config_mod.save_config(cfg)
+        if password_changed:
+            _invalidate_all_sessions()
         if _monitor:
             _monitor.reload()
         _json_ok(self, {"message": "บันทึก config แล้ว — มีผลทันที"})
@@ -691,7 +869,7 @@ class WebUI:
         self._thread = None
 
     def start(self):
-        self._server = ThreadingHTTPServer((self.host, self.port), RDPGuardHandler)
+        self._server = RDPGuardHTTPServer((self.host, self.port), RDPGuardHandler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
         log.info("Web UI เปิดที่ http://%s:%s", self.host, self.port)

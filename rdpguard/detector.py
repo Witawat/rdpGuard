@@ -46,6 +46,21 @@ def is_valid_ip(value):
         return False
 
 
+def is_valid_ip_or_cidr(value):
+    """IP เดี่ยว หรือ CIDR (เช่น 192.168.1.0/24)"""
+    value = (value or "").strip()
+    if not value:
+        return False
+    try:
+        if "/" in value:
+            ipaddress.ip_network(value, strict=False)
+        else:
+            ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return False
+
+
 def _own_ips():
     result = {"127.0.0.1", "::1", "0.0.0.0", "::"}
     try:
@@ -116,10 +131,37 @@ class BruteForceDetector:
     def handle_event(self, item):
         """รับ event จาก engine — item: dict {kind, ip, user, source, ts, ...}"""
         kind = item.get("kind")
+        if kind in ("fail", "success", "ntlm"):
+            try:
+                self.db.add_event(
+                    kind,
+                    ip=str(item.get("ip") or ""),
+                    user=str(item.get("user") or ""),
+                    domain=str(item.get("domain") or ""),
+                    logon_type=int(item.get("logon_type") or 0),
+                    source=str(item.get("source") or ""),
+                )
+            except Exception:
+                log.exception("บันทึก event ล้มเหลว")
         if kind == "fail":
             self.handle_failed(item)
         elif kind == "success":
             self.handle_success(item)
+
+    def _never_block(self, parser, ip):
+        from . import config as config_mod
+
+        for entry in config_mod.get_list(parser, "detection", "never_block_ips"):
+            try:
+                if entry == ip or (
+                    "/" in entry
+                    and ipaddress.ip_address(ip)
+                    in ipaddress.ip_network(entry, strict=False)
+                ):
+                    return True
+            except ValueError:
+                continue
+        return False
 
     def handle_failed(self, item):
         parser = self._config()
@@ -135,18 +177,21 @@ class BruteForceDetector:
             types = self._logon_types()
             if types is not None and int(item.get("logon_type", 0)) not in types:
                 return
-        skip_local = config_mod.get_bool(parser, "detection", "skip_local_ips", True)
-        if skip_local and is_local_ip(ip):
-            return
         if self.db.is_whitelisted(ip):
             log.info("ข้าม IP %s (อยู่ใน whitelist)", ip)
             return
-        if self.db.is_blocked(ip):
-            self._maybe_extend(parser, ip)
+        if self._never_block(parser, ip):
+            log.info("ข้าม IP %s (อยู่ใน never_block_ips)", ip)
             return
-        if self._is_blacklisted(ip):
+        if self.db.is_blacklisted(ip):
             log.info("IP %s อยู่ใน blacklist — บล็อกทันที", ip)
             self._do_block(parser, ip, "blacklist", source)
+            return
+        skip_local = config_mod.get_bool(parser, "detection", "skip_local_ips", True)
+        if skip_local and is_local_ip(ip):
+            return
+        if self.db.is_blocked(ip):
+            self._maybe_extend(parser, ip)
             return
 
         max_attempts = self._max_attempts(source)
@@ -166,11 +211,21 @@ class BruteForceDetector:
             "ล็อกอินล้มเหลว (%s) จาก %s (user=%s) — %d ครั้งใน %d นาที",
             label,
             ip,
-            item.get("user", "-"),
+            str(item.get("user", "-")).replace("\n", " "),
             count,
             window_minutes,
         )
         if count < max_attempts:
+            return
+        grace = config_mod.get_int(parser, "detection", "active_session_grace_minutes", 30)
+        if grace > 0 and self.db.recent_success(ip, grace):
+            log.warning(
+                "ข้ามการบล็อก IP %s — มี session ล็อกอินสำเร็จภายใน %d นาที (ป้องกันผู้ดูแลถูกล็อก)",
+                ip,
+                grace,
+            )
+            with self._lock:
+                self._attempts.pop(key, None)
             return
         self._do_block(parser, ip, "auto", source)
 
@@ -181,9 +236,15 @@ class BruteForceDetector:
         source = str(item.get("source") or "rdp")
         with self._lock:
             self._attempts.pop((source, ip), None)
-
-    def _is_blacklisted(self, ip):
-        return any(row["ip"] == ip for row in self.db.list_blacklist())
+        row = self.db.is_blocked(ip)
+        if row:
+            ok = self.fw.remove_block(ip)
+            self.db.unblock_ip(ip, by="auto-login")
+            log.warning(
+                "IP %s ล็อกอินสำเร็จ — ปลดบล็อกอัตโนมัติ (rule ลบ=%s)",
+                ip,
+                "OK" if ok else "FAIL",
+            )
 
     def _maybe_extend(self, parser, ip):
         from . import config as config_mod
@@ -197,6 +258,16 @@ class BruteForceDetector:
         if hours <= 0:
             return
         new_expiry = _now_utc() + timedelta(hours=hours)
+        current = row.get("expires") or ""
+        if not current:
+            return  # บล็อกถาวร (expires ว่าง) — อย่าแตะ
+        if current:
+            try:
+                cur = datetime.strptime(current, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+                if cur > new_expiry:
+                    return  # expires เดิมยาวกว่าอยู่แล้ว (เช่น escalate) — อย่าลดลง
+            except ValueError:
+                pass
         self.db.extend_block(ip, _iso(new_expiry))
         log.info("ต่ออายุบล็อก IP %s (ยังโจมตีต่อ)", ip)
 
@@ -208,18 +279,42 @@ class BruteForceDetector:
         prefix = config_mod.get(parser, "firewall", "rule_prefix", "RDPGuard Block")
         ports = config_mod.get(parser, "firewall", "blocked_ports", "").strip()
         rule_name = f"{prefix} {ip}"
+        label = ENGINE_LABELS.get(engine, engine)
 
         if self.db.is_blocked(ip):
             self._maybe_extend(parser, ip)
             return
-        self.fw.ports = [p.strip() for p in ports.split(",") if p.strip()] if ports else []
-        ok = self.fw.add_block(ip)
-        label = ENGINE_LABELS.get(engine, engine)
-        reason = (
-            f"ล็อกอิน {label} ล้มเหลวเกินกำหนด ({source})"
-            + ("" if ok else " [FIREWALL ล้มเหลว — ตรวจสิทธิ์ admin]")
-        )
+
+        reason = f"ล็อกอิน {label} ล้มเหลวเกินกำหนด ({source})"
+
+        if source == "auto":
+            escalate_after = config_mod.get_int(parser, "detection", "escalate_after_blocks", 3)
+            window_days = config_mod.get_int(parser, "detection", "escalation_window_days", 30)
+            if escalate_after > 0 and window_days > 0:
+                since = (datetime.now(timezone.utc) - timedelta(days=window_days)).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                )
+                prior = self.db.count_prior_blocks(ip, since)
+                if prior >= escalate_after:
+                    if config_mod.get_bool(parser, "detection", "escalate_to_permanent", False):
+                        expires = ""
+                        reason = (
+                            f"ล็อกอิน {label} ล้มเหลวซ้ำ (ครั้งที่ {prior + 1}) — "
+                            "ขาประจำ ขยายเป็นบล็อกถาวร"
+                        )
+                    else:
+                        esc_hours = config_mod.get_int(parser, "detection", "escalate_block_hours", 168)
+                        expires = _iso(_now_utc() + timedelta(hours=esc_hours)) if esc_hours > 0 else ""
+                        reason = (
+                            f"ล็อกอิน {label} ล้มเหลวซ้ำ (ครั้งที่ {prior + 1}) — "
+                            f"ขยายบล็อกเป็น {esc_hours} ชม."
+                        )
+
+        ok = self.fw.add_block(ip, ports=[p.strip() for p in ports.split(",") if p.strip()] if ports else None)
+        reason = reason + ("" if ok else " [FIREWALL ล้มเหลว — ตรวจสิทธิ์ admin]")
         self.db.block_ip(ip, reason=reason, source=source, expires=expires, rule_name=rule_name)
+        with self._lock:
+            self._attempts.pop((engine, ip), None)
         if ok:
             log.warning("บล็อก IP %s (%s) จนถึง %s", ip, label, expires or "ถาวร")
         else:

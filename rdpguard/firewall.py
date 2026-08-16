@@ -72,7 +72,7 @@ class FirewallManager:
 
     # ---- COM operations (รันบน worker thread) ----
 
-    def _com_add_block(self, ip):
+    def _com_add_block(self, ip, ports):
         import win32com.client
 
         fw = win32com.client.Dispatch("HNetCfg.FwPolicy2")
@@ -91,11 +91,11 @@ class FirewallManager:
         rule.InterfaceTypes = INTERFACE_TYPES_ALL
         rule.RemoteAddresses = ip
         rule.Profiles = NET_FW_PROFILE2_ALL
-        if self.ports:
+        if ports:
             rule.Protocol = 6  # TCP
-            rule.LocalPorts = ",".join(str(p) for p in self.ports)
+            rule.LocalPorts = ",".join(str(p) for p in ports)
         fw.Rules.Add(rule)
-        log.info("COM: บล็อก IP %s เรียบร้อย (ports=%s)", ip, ",".join(map(str, self.ports)) or "all")
+        log.info("COM: บล็อก IP %s เรียบร้อย (ports=%s)", ip, ",".join(map(str, ports)) or "all")
         return True
 
     def _com_remove_block(self, ip):
@@ -122,15 +122,17 @@ class FirewallManager:
 
     # ---- public API ----
 
-    def add_block(self, ip):
-        """เพิ่ม rule บล็อกขาเข้าจาก IP — คืน True เมื่อสำเร็จ (หรือ rule มีอยู่แล้ว)"""
+    def add_block(self, ip, ports=None):
+        """เพิ่ม rule บล็อกขาเข้าจาก IP — ports: รายการพอร์ต (None/[] = ทุกพอร์ต)"""
+        if ports is None:
+            ports = list(self.ports)
         try:
-            return self._com_call(self._com_add_block, ip)
+            return self._com_call(self._com_add_block, ip, list(ports))
         except Exception as exc:
             log.warning("COM firewall ล้มเหลว (%s) — ลอง netsh แทน", exc)
-        return self._add_block_netsh(ip)
+        return self._add_block_netsh(ip, ports)
 
-    def _add_block_netsh(self, ip):
+    def _add_block_netsh(self, ip, ports):
         profile = _PROFILE_ARG.get(self.profile, "any")
         args = [
             "add",
@@ -142,11 +144,11 @@ class FirewallManager:
             f"profile={profile}",
             "enable=yes",
         ]
-        if self.ports:
-            args += ["protocol=TCP", "localport=" + ",".join(str(p) for p in self.ports)]
+        if ports:
+            args += ["protocol=TCP", "localport=" + ",".join(str(p) for p in ports)]
         ok = self._netsh(args)
         if ok:
-            log.info("netsh: บล็อก IP %s เรียบร้อย (ports=%s)", ip, ",".join(map(str, self.ports)) or "all")
+            log.info("netsh: บล็อก IP %s เรียบร้อย (ports=%s)", ip, ",".join(map(str, ports)) or "all")
         else:
             log.error("netsh: บล็อก IP %s ล้มเหลว", ip)
         return ok

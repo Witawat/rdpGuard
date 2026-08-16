@@ -138,6 +138,21 @@ log ล่าสุด (max 2000) — `{ "lines": ["..."], "file": "C:\\...\\rdp
 ```
 `working: false` + เหตุผลเมื่อทำไม่ได้ (เช่น ไม่มีสิทธิ์ admin)
 
+### POST /api/unblock-all
+ฉุกเฉิน: ปลดบล็อกทุก IP ที่ RDPGuard บล็อกไว้ (ลบ rule firewall + ลบจากตาราง) — `{ "message": "ปลดบล็อกทั้งหมดแล้ว (N IP)" }`
+
+### POST /api/self-test
+ทดสอบระบบครบวงจร (ต้องรันด้วย admin/service) — เขียน event จำลอง 5 รายการ (Event 18456, `CLIENT: 8.8.8.8`) ลง Application log จริง → รอ engine ตรวจจับ + บล็อก → ตรวจ rule firewall → ปลดบล็อก + ลบ event ทดสอบ
+```json
+{ "ok": true, "data": {
+  "working": true,
+  "steps": ["เขียน event จำลอง 5 รายการ ... OK", "engine MSSQL อ่าน event → detector บล็อก 8.8.8.8 — OK", "...", "ปลดบล็อก + ลบ event ทดสอบ — OK"],
+  "message": "✅ self-test ผ่านครบวงจร: ..."
+} }
+```
+- ใช้เวลา ~15-25 วินาที (รอ engine poll + บล็อก)
+- ต้องเปิด engine `mssql` อยู่ และ `monitor.enable = true`
+
 > `/api/overview` มีฟิลด์ `health` ด้วย: `{ is_admin, in_service, can_add_rules, eventlog_ok, firewall_com_ok, engines: {...}, monitor_running }` — ใช้ตรวจสถานะส่วนประกอบสำคัญ
 
 ### POST /api/settings

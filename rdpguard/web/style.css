@@ -92,13 +92,14 @@ section.panel .panel-head {
 section.panel .panel-head h2 { margin: 0; font-size: 0.98rem; font-weight: 600; }
 section.panel .panel-head .spacer { flex: 1; }
 section.panel .panel-head .hint { font-size: 0.78rem; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
-section.panel .panel-body { padding: 0.75rem 1rem; min-width: 0; }
+section.panel .panel-body { padding: 0.75rem 1rem; min-width: 0; overflow-x: auto; }
 
 table { width: 100%; border-collapse: collapse; font-size: 0.85rem; min-width: 0; }
 th {
   text-align: left; font-size: 0.75rem; color: var(--muted);
   font-weight: 600; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border);
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--surface-2); vertical-align: middle; overflow-wrap: anywhere; }
 td.nw { white-space: nowrap; }
@@ -277,9 +278,18 @@ td.geo { white-space: nowrap; }
 
 /* health table */
 .health-table td, .health-table th { padding: 0.4rem 0.7rem; }
+.health-table td:last-child { overflow-wrap: anywhere; }
 .h-ok { color: var(--ok); font-weight: 700; }
 .h-err { color: var(--danger); font-weight: 700; }
 .h-mute { color: var(--muted); }
+.health-fix { margin-top: 0.3rem; color: var(--accent); font-size: 0.8rem; }
+.selftest-steps { margin: 0.6rem 0 0; padding-left: 1.2rem; list-style: none; }
+.selftest-steps li { font-size: 0.82rem; padding: 0.25rem 0; }
+.st-ok { color: var(--ok); }
+.st-ok::before { content: "✔ "; }
+.st-fail { color: var(--danger); }
+.st-fail::before { content: "✘ "; }
+.st-pending { color: var(--muted); }
 
 /* windows service panel */
 .svc-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.8rem; }

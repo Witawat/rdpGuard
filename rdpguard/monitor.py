@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 from . import config as config_mod
 from .database import Database
-from .detector import BruteForceDetector, is_valid_ip
+from .detector import BruteForceDetector, is_valid_ip, is_valid_ip_or_cidr
 from .engines import ALL_ENGINES
 from .firewall import FirewallManager
 
@@ -35,6 +35,10 @@ class Monitor:
     def reload(self):
         self.cfg = config_mod.load_config()
         self.detector.reload(self.cfg)
+        prefix = config_mod.get(self.cfg, "firewall", "rule_prefix", "RDPGuard Block")
+        profile = config_mod.get(self.cfg, "firewall", "profile", "any")
+        self.fw.rule_prefix = prefix
+        self.fw.profile = profile
         self._restart_engines()
         log.info("โหลด config ใหม่เรียบร้อย")
 
@@ -90,11 +94,38 @@ class Monitor:
             if self.fw.remove_block(ip):
                 self.db.unblock_ip(ip, by="expire")
                 log.info("บล็อก IP %s หมดอายุ — ปลดบล็อกแล้ว", ip)
+        # ฉุกเฉิน: ปลดบล็อก IP ที่อยู่ใน whitelist / never_block_ips (กันล็อกตัวเอง)
+        for row in self.db.list_blocked():
+            ip = row["ip"]
+            if self.db.is_whitelisted(ip) or self.detector._never_block(self.cfg, ip):
+                if self.fw.remove_block(ip):
+                    self.db.unblock_ip(ip, by="whitelist")
+                    log.warning("ปลดบล็อก IP %s (อยู่ใน whitelist/never_block_ips)", ip)
+
+    def unblock_all(self):
+        """ปลดบล็อกทั้งหมด (ฉุกเฉิน) — คืนจำนวนที่ปลด"""
+        count = 0
+        for row in self.db.list_blocked():
+            ip = row["ip"]
+            ok = self.fw.remove_block(ip)
+            self.db.unblock_ip(ip, by="unblock-all")
+            count += 1
+            log.warning("unblock-all: ปลดบล็อก IP %s (rule ลบ=%s)", ip, "OK" if ok else "FAIL")
+        return count
+
+    def allow_ip(self, ip):
+        """เพิ่ม whitelist + ปลดบล็อกถ้าถูกบล็อกอยู่ (ฉุกเฉิน)"""
+        self.db.add_whitelist(ip, "allow (ฉุกเฉิน)")
+        if self.db.is_blocked(ip):
+            self.fw.remove_block(ip)
+            self.db.unblock_ip(ip, by="allow")
+            return True, f"เพิ่ม {ip} ใน whitelist และปลดบล็อกแล้ว"
+        return True, f"เพิ่ม {ip} ใน whitelist แล้ว"
 
     def manual_block(self, ip, hours=24):
-        """บล็อก IP ด้วยมือ (จาก Web UI / CLI)"""
-        if not is_valid_ip(ip):
-            return False, "รูปแบบ IP ไม่ถูกต้อง"
+        """บล็อก IP ด้วยมือ (จาก Web UI / CLI) — รองรับ IP เดี่ยวหรือ CIDR"""
+        if not is_valid_ip_or_cidr(ip):
+            return False, "รูปแบบ IP/CIDR ไม่ถูกต้อง"
         if self.db.is_blocked(ip):
             return False, "IP นี้ถูกบล็อกอยู่แล้ว"
         expires = ""
@@ -103,8 +134,9 @@ class Monitor:
                 "%Y-%m-%dT%H:%M:%SZ"
             )
         ports = config_mod.get(self.cfg, "firewall", "blocked_ports", "").strip()
-        self.fw.ports = [p.strip() for p in ports.split(",") if p.strip()] if ports else []
-        ok = self.fw.add_block(ip)
+        ok = self.fw.add_block(
+            ip, ports=[p.strip() for p in ports.split(",") if p.strip()] if ports else None
+        )
         self.db.block_ip(
             ip,
             reason="บล็อกด้วยมือจากผู้ดูแล",

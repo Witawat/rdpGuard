@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RDPGuard</title>
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/style.css?v=1.4.1">
 </head>
 <body>
 
@@ -134,8 +134,10 @@
         </table>
         <div class="add-row" style="margin-top:0.7rem">
           <button class="primary" id="fw-test-btn">ทดสอบบล็อกจริง (firewall)</button>
+          <button class="primary" id="selftest-btn" title="ทดสอบครบวงจร: เขียน event จำลอง → ตรวจจับ → บล็อก → ตรวจ rule → ปลดบล็อก">ทดสอบระบบทั้งหมด (self-test)</button>
           <span class="hint" id="fw-test-msg"></span>
         </div>
+        <ul class="selftest-steps" id="selftest-steps"></ul>
       </div>
     </section>
 
@@ -197,6 +199,11 @@
           <thead><tr><th>IP</th><th>ประเทศ</th><th>เหตุผล</th><th>ที่มา</th><th>บล็อกเมื่อ (UTC)</th><th>หมดอายุ (UTC)</th><th></th></tr></thead>
           <tbody></tbody>
         </table>
+        <div class="hint" style="margin-top:0.5rem">ปุ่ม "ตรวจ cmd" = คัดลอกคำสั่ง Windows ตรวจสอบ rule + event log ของ IP นั้นไปวางใน Command Prompt (admin)</div>
+        <div class="add-row" style="margin-top:0.7rem">
+          <button class="danger" id="unblock-all-btn" title="ฉุกเฉิน: ปลดบล็อกทุก IP ที่ RDPGuard บล็อกไว้">ปลดบล็อกทั้งหมด (ฉุกเฉิน)</button>
+          <span class="hint">ใช้เมื่อถูกล็อกตัวเอง — ปลดทุก IP ที่ถูกบล็อกทันที</span>
+        </div>
         <div class="empty" id="blocked-empty" style="display:none">ยังไม่มี IP ถูกบล็อก</div>
       </div>
     </section>
@@ -262,6 +269,6 @@
 </div>
 
 <div class="toast-wrap" id="toasts"></div>
-<script src="/app.js"></script>
+<script src="/app.js?v=1.4.1"></script>
 </body>
 </html>

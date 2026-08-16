@@ -73,9 +73,13 @@ function showLogin() {
   $("login-password").focus();
 }
 
+let appIntervals = [];
+
 function showApp() {
   $("login-view").style.display = "none";
   $("app-view").style.display = "block";
+  appIntervals.forEach(clearInterval);
+  appIntervals = [];
   refreshOverview();
   refreshDetection();
   refreshService();
@@ -84,11 +88,11 @@ function showApp() {
   refreshLists();
   refreshSettings();
   refreshLog();
-  setInterval(refreshOverview, 3000);
-  setInterval(refreshEvents, 3000);
-  setInterval(refreshBlocked, 5000);
-  setInterval(refreshService, 10000);
-  setInterval(refreshLog, 5000);
+  appIntervals.push(setInterval(refreshOverview, 3000));
+  appIntervals.push(setInterval(refreshEvents, 3000));
+  appIntervals.push(setInterval(refreshBlocked, 5000));
+  appIntervals.push(setInterval(refreshService, 10000));
+  appIntervals.push(setInterval(refreshLog, 5000));
   checkSetup();
 }
 
@@ -383,14 +387,17 @@ async function refreshOverview() {
 
 /* ---------- system health ---------- */
 
-function healthRow(name, status, detail) {
+function healthRow(name, status, detail, fix) {
   const tr = document.createElement("tr");
   const icon = status === "ok" ? '<span class="h-ok">&#10004;</span>'
     : status === "error" ? '<span class="h-err">&#10008;</span>'
     : status === "no-source" ? '<span class="h-mute">&#9675;</span>'
     : '<span class="h-mute">&#8855;</span>';
   const label = status === "ok" ? "ทำงานได้" : status === "error" ? "มีปัญหา" : status === "no-source" ? "ไม่พร้อมใช้งาน" : "ปิดอยู่";
-  tr.innerHTML = `<td>${esc(name)}</td><td>${icon} <span class="h-${status === "ok" ? "ok" : status === "error" ? "err" : "mute"}">${label}</span></td><td>${esc(detail)}</td>`;
+  const fixHtml = fix
+    ? `<div class="health-fix">วิธีแก้ไข: ${fix}</div>`
+    : "";
+  tr.innerHTML = `<td>${esc(name)}</td><td>${icon} <span class="h-${status === "ok" ? "ok" : status === "error" ? "err" : "mute"}">${label}</span></td><td>${esc(detail)}${fixHtml}</td>`;
   return tr;
 }
 
@@ -401,30 +408,42 @@ function renderHealth(h) {
   tbody.appendChild(healthRow(
     "Security event log (แหล่งหลัก)",
     h.eventlog_ok ? "ok" : "error",
-    h.eventlog_ok ? "อ่านได้ — เฝ้าระวัง RDP/FTP/MSSQL-Windows-auth ได้" : "อ่านไม่ได้ (สิทธิ์ไม่พอ) — service (SYSTEM) อ่านได้ หรือรันแบบ admin"
+    h.eventlog_ok ? "อ่านได้ — เฝ้าระวัง RDP/FTP/MSSQL-Windows-auth ได้" : "อ่านไม่ได้ (สิทธิ์ไม่พอ)",
+    h.eventlog_ok ? "" : "ติดตั้งเป็น service ด้วย install.bat (รันเป็น SYSTEM อ่านได้) หรือเปิดโปรแกรมด้วยสิทธิ์ administrator (คลิกขวา → Run as administrator)"
   ));
   tbody.appendChild(healthRow(
     "Windows Firewall (ตัวบล็อก)",
     h.firewall_com_ok ? (h.can_add_rules ? "ok" : "no-source") : "error",
     h.firewall_com_ok
-      ? (h.can_add_rules ? "เข้าถึงได้ + มีสิทธิ์เพิ่ม rule — บล็อกได้จริง" : "เข้าถึงได้ แต่ไม่มีสิทธิ์เพิ่ม rule (ต้อง admin/service)")
-      : "เข้าถึง COM ไม่ได้"
+      ? (h.can_add_rules ? "เข้าถึงได้ + มีสิทธิ์เพิ่ม rule — บล็อกได้จริง" : "เข้าถึงได้ แต่ไม่มีสิทธิ์เพิ่ม rule")
+      : "เข้าถึง COM ไม่ได้",
+    h.can_add_rules ? "" : "รันแบบ admin หรือติดตั้งเป็น service; ตรวจ service \"Windows Defender Firewall\" กำลังรัน (services.msc)"
   ));
   tbody.appendChild(healthRow(
     "สิทธิ์โปรแกรม",
     h.is_admin || h.in_service ? "ok" : "error",
-    h.in_service ? "รันเป็น SYSTEM (สิทธิ์สูงสุด)" : h.is_admin ? "รันด้วย admin" : "รันแบบผู้ใช้ธรรมดา — บล็อกไม่ได้ ต้องเปิดด้วย Run as administrator"
+    h.in_service ? "รันเป็น SYSTEM (สิทธิ์สูงสุด)" : h.is_admin ? "รันด้วย admin" : "รันแบบผู้ใช้ธรรมดา — บล็อกไม่ได้",
+    h.is_admin || h.in_service ? "" : "ปิดโปรแกรม แล้วเปิดใหม่ด้วย Run as administrator หรือติดตั้งเป็น service (install.bat)"
   ));
   tbody.appendChild(healthRow(
     "Monitor / เฝ้าระวัง",
     h.monitor_running ? "ok" : "error",
-    h.monitor_running ? "กำลังรัน (engines: " + Object.values(h.engines || {}).filter((v) => v === "ok").length + "/" + Object.keys(h.engines || {}).length + " แหล่งพร้อม)" : "monitor ไม่ได้รัน"
+    h.monitor_running ? "กำลังรัน (engines: " + Object.values(h.engines || {}).filter((v) => v === "ok").length + "/" + Object.keys(h.engines || {}).length + " แหล่งพร้อม)" : "monitor ไม่ได้รัน",
+    h.monitor_running ? "" : "รันด้วยคำสั่ง run (python run.py run) หรือติดตั้งเป็น service"
   ));
   const engMap = { rdp: "RDP", openssh: "OpenSSH", mssql: "MSSQL", iis: "IIS Web", mysql: "MySQL", generic: "Generic" };
+  const engFix = {
+    rdp: "ต้องมีสิทธิ์อ่าน Security log — ดูแถวบนสุด",
+    openssh: "ติดตั้ง OpenSSH Server (Windows Features) หรือปิด engine ถ้าไม่ใช้",
+    mssql: "ติดตั้ง/เปิด MSSQL Server หรือปิด engine ถ้าไม่ใช้",
+    iis: "ติดตั้ง IIS หรือตั้ง iis_log_dir ในหน้า ตั้งค่า",
+    mysql: "ติดตั้ง MySQL หรือตั้ง mysql_log_dir ในหน้า ตั้งค่า",
+    generic: "ตั้งค่า generic_logs (ชื่อ=path|regex) ในหน้า ตั้งค่า ดู CONFIG.md",
+  };
   for (const [key, label] of Object.entries(engMap)) {
     const st = (h.engines || {})[key] || "disabled";
-    const detail = st === "ok" ? "แหล่งข้อมูลพร้อม" : st === "error" ? "อ่านแหล่งข้อมูลไม่ได้" : st === "no-source" ? "ยังไม่พบแหล่งข้อมูล (เปิดใช้ตอนติดตั้ง service นั้น)" : "ปิดใช้งาน (กด chip เปิดได้)";
-    tbody.appendChild(healthRow(`Engine: ${label}`, st, detail));
+    const detail = st === "ok" ? "แหล่งข้อมูลพร้อม" : st === "error" ? "อ่านแหล่งข้อมูลไม่ได้" : st === "no-source" ? "ยังไม่พบแหล่งข้อมูล" : "ปิดใช้งาน (กด chip เปิดได้)";
+    tbody.appendChild(healthRow(`Engine: ${label}`, st, detail, st === "ok" || st === "disabled" ? "" : engFix[key]));
   }
 }
 
@@ -439,6 +458,29 @@ $("fw-test-btn").addEventListener("click", async () => {
     toast(data.working ? "Firewall ทำงานได้จริง" : "Firewall ยังใช้ไม่ได้ — ดูรายละเอียด", data.working ? "ok" : "error");
   } catch (e) {
     msg.textContent = e.message;
+    toast(e.message, "error");
+  }
+  btn.disabled = false;
+  refreshOverview();
+});
+
+$("selftest-btn").addEventListener("click", async () => {
+  const btn = $("selftest-btn");
+  const list = $("selftest-steps");
+  btn.disabled = true;
+  list.innerHTML = '<li class="st-pending">กำลังทดสอบระบบทั้งหมด (ใช้เวลาประมาณ 15-30 วิ)...</li>';
+  try {
+    const { data } = await api("/api/self-test", { method: "POST", body: "{}", timeout: 60000 });
+    list.innerHTML = "";
+    (data.steps || []).forEach((step) => {
+      const li = document.createElement("li");
+      li.className = "st-" + (step.includes("FAIL") ? "fail" : "ok");
+      li.textContent = step;
+      list.appendChild(li);
+    });
+    toast(data.message, data.working ? "ok" : "error");
+  } catch (e) {
+    list.innerHTML = `<li class="st-fail">${esc(e.message)}</li>`;
     toast(e.message, "error");
   }
   btn.disabled = false;
@@ -481,6 +523,7 @@ async function refreshBlocked() {
       const tr = document.createElement("tr");
       tr.dataset.ip = b.ip;
       const expires = b.expires ? fmtTs(b.expires) : "ถาวร";
+      const ruleName = b.rule_name || "RDPGuard Block " + b.ip;
       tr.innerHTML = `
         <td class="mono">${esc(b.ip)}</td>
         <td class="geo">-</td>
@@ -488,7 +531,10 @@ async function refreshBlocked() {
         <td>${sourceBadge(b.source)}</td>
         <td class="mono nw">${fmtTs(b.created)}</td>
         <td class="mono nw">${expires}</td>
-        <td><button class="small danger unblock" data-ip="${esc(b.ip)}">ปลดบล็อก</button></td>`;
+        <td>
+          <button class="small check-cmd" data-ip="${esc(b.ip)}" data-rule="${esc(ruleName)}" title="คัดลอกคำสั่งตรวจสอบผ่าน cmd">ตรวจ cmd</button>
+          <button class="small danger unblock" data-ip="${esc(b.ip)}">ปลดบล็อก</button>
+        </td>`;
       tbody.appendChild(tr);
     });
     fillCountry(data.blocked, (r) => r.ip, 2, "blocked-table");
@@ -511,6 +557,17 @@ $("block-btn").addEventListener("click", async () => {
   }
 });
 
+$("unblock-all-btn").addEventListener("click", async () => {
+  if (!confirm("ปลดบล็อกทุก IP ที่ถูกบล็อกไว้จริงหรือ? (ใช้เมื่อฉุกเฉิน)")) return;
+  try {
+    const { data } = await api("/api/unblock-all", { method: "POST", body: "{}" });
+    toast(data.message, "ok");
+    refreshBlocked();
+  } catch (e) {
+    toast(e.message, "error");
+  }
+});
+
 document.addEventListener("click", async (e) => {
   const btn = e.target.closest(".unblock");
   if (!btn) return;
@@ -523,6 +580,27 @@ document.addEventListener("click", async (e) => {
   } catch (err) {
     toast(err.message, "error");
   }
+});
+
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest(".check-cmd");
+  if (!btn) return;
+  const ip = btn.dataset.ip;
+  const rule = btn.dataset.rule;
+  const cmds = [
+    `REM 1) ตรวจว่า rule ถูกสร้างใน Windows Firewall (รัน cmd แบบ admin):`,
+    `netsh advfirewall firewall show rule name="${rule}"`,
+    `REM 2) ดูความพยายามล็อกอิน RDP ล้มเหลว (Event 4625) จาก IP นี้ (Security log):`,
+    `wevtutil qe Security "/q:*[System[(EventID=4625)]]" /c:20 /rd:true /f:text | findstr /i "${ip}"`,
+    `REM 3) ดู MSSQL ล็อกอินล้มเหลว (Event 18456, Application log):`,
+    `wevtutil qe Application "/q:*[System[(EventID=18456)]]" /c:20 /rd:true /f:text | findstr /i "${ip}"`,
+    `REM 4) ดู log ของ RDPGuard เอง:`,
+    `type "%ProgramData%\\RDPGuard\\rdpguard.log" | findstr /i "${ip}"`,
+  ].join("\r\n");
+  navigator.clipboard.writeText(cmds).then(
+    () => toast(`คัดลอกคำสั่งตรวจสอบ ${ip} แล้ว — วางใน Command Prompt (admin)`, "ok"),
+    () => toast("คัดลอกไม่สำเร็จ", "error")
+  );
 });
 
 /* ---------- whitelist / blacklist ---------- */
@@ -598,8 +676,9 @@ async function refreshLog() {
   try {
     const { data } = await api("/api/log?lines=250");
     const view = $("log-view");
+    const nearBottom = view.scrollHeight - view.scrollTop - view.clientHeight < 80;
     view.textContent = data.lines.length ? data.lines.join("\n") : "(log ว่างเปล่า)";
-    view.scrollTop = view.scrollHeight;
+    if (nearBottom) view.scrollTop = view.scrollHeight;
     $("log-file-hint").textContent = data.file || "";
   } catch (e) {}
 }
@@ -625,6 +704,12 @@ const SETTINGS_UI = {
       { key: "block_hours", label: "บล็อกนาน (ชั่วโมง, 0 = ถาวร)", type: "int" },
       { key: "auto_extend", label: "ต่ออายุบล็อกอัตโนมัติ", type: "bool" },
       { key: "skip_local_ips", label: "ข้าม IP ในวง LAN/เครื่องตัวเอง", type: "bool" },
+      { key: "active_session_grace_minutes", label: "กันบล็อก IP ที่มี session จริง (นาที)", type: "int" },
+      { key: "never_block_ips", label: "never_block_ips (IP/CIDR คั่น ,)", type: "text" },
+      { key: "escalate_after_blocks", label: "ขยายบล็อกเมื่อโดนบล็อกครบกี่ครั้ง (0=ปิด)", type: "int" },
+      { key: "escalate_block_hours", label: "ขยายเป็นกี่ชั่วโมง (ค่าเริ่มต้น 168)", type: "int" },
+      { key: "escalate_to_permanent", label: "ขยายเป็นบล็อกถาวร (แทนชั่วโมง)", type: "bool" },
+      { key: "escalation_window_days", label: "กรอบเวลานับครั้ง (วัน)", type: "int" },
     ],
   },
   firewall: {

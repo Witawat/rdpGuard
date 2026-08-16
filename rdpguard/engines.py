@@ -13,6 +13,7 @@ Engine ทั้งหมดส่ง item {kind, ip, user, source, ts} ให�
 """
 
 import glob
+import ipaddress
 import logging
 import os
 import re
@@ -54,8 +55,60 @@ def _evt_message(evt):
             return ""
 
 
+# ---- 4625/4624 layout ต่างกันตาม Windows เวอร์ชัน ----
+# Win7/2008R2: ins[3]=LogonType, ins[5]=SourceNetworkAddress
+# Win10/2016+: ins[4]=LogonType, ins[14]=SourceNetworkAddress (4625), ins[12] (4624)
+# parser นี้จึงสแกนหาแบบ version-agnostic
+
+
+def _find_logon_type(ins):
+    for x in ins[:18]:
+        try:
+            v = int(x)
+        except (TypeError, ValueError):
+            continue
+        if 2 <= v <= 13:
+            return v
+    return 0
+
+
+def _find_ip(ins, preferred):
+    for idx in preferred:
+        if idx < len(ins):
+            v = (ins[idx] or "").strip()
+            if _looks_like_ip(v):
+                return v
+    for x in ins:
+        if _looks_like_ip(x):
+            return x
+    return "-"
+
+
+def _looks_like_ip(value):
+    if not value or value in ("-", "0.0.0.0", "::", "::1"):
+        return False
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return False
+
+
+def _pick_user(ins, idx_new, idx_old):
+    """Win10 เอา TargetUserName (ins[6]/ins[7]) แต่ Win7 ตำแหน่งนั้นเป็นตัวเลข (พอร์ต)"""
+    if idx_new < len(ins) and ins[idx_new] and not ins[idx_new].isdigit():
+        return ins[idx_new]
+    return ins[idx_old] if idx_old < len(ins) else "-"
+
+
 def _log_watch_loop(channel, handler, stop_event, poll_interval, source):
-    """อ่าน event log channel ต่อเนื่อง (จำ RecordNumber ล่าสุด) — 1 thread ต่อ channel"""
+    """อ่าน event log channel ต่อเนื่อง — 1 thread ต่อ channel.
+
+    วิธีอ่าน: เปิดครั้งแรกอ่านแบบ BACKWARDS 1 batch เพื่อหา RecordNumber ล่าสุด
+    (วางตำแหน่งให้อยู่ท้าย log) จากนั้นอ่าน FORWARDS ต่อเนื่อง — event ใหม่
+    เห็นภายใน 1-2 poll แม้ log จะใหญ่ (เดิมอ่าน backward ตลอด → ช้าเป็นนาที
+    บน log ที่เต็มไปด้วย 4625).
+    """
     import win32api
     import win32evtlog
 
@@ -63,52 +116,62 @@ def _log_watch_loop(channel, handler, stop_event, poll_interval, source):
     last_record = 0
     retry_wait = 5.0
     last_err_log = 0.0
-    while not stop_event.is_set():
-        try:
-            if handle is None:
-                handle = win32evtlog.OpenEventLog(None, channel)
+    try:
+        while not stop_event.is_set():
+            try:
+                if handle is None:
+                    handle = win32evtlog.OpenEventLog(None, channel)
+                    flags = (
+                        win32evtlog.EVENTLOG_BACKWARDS_READ
+                        | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+                    )
+                    for evt in win32evtlog.ReadEventLog(handle, flags, 0):
+                        last_record = max(last_record, evt.RecordNumber)
+                    continue
+
                 flags = (
-                    win32evtlog.EVENTLOG_BACKWARDS_READ
+                    win32evtlog.EVENTLOG_FORWARDS_READ
                     | win32evtlog.EVENTLOG_SEQUENTIAL_READ
                 )
-                for evt in win32evtlog.ReadEventLog(handle, flags, 0):
-                    last_record = max(last_record, evt.RecordNumber)
+                while True:
+                    events = win32evtlog.ReadEventLog(handle, flags, 0)
+                    if not events:
+                        break
+                    for evt in events:
+                        if evt.RecordNumber <= last_record:
+                            continue
+                        last_record = max(last_record, evt.RecordNumber)
+                        try:
+                            handler(evt)
+                        except Exception:
+                            log.exception("parse event (%s) ล้มเหลว", source)
+            except win32api.error as exc:
+                now = time.time()
+                if now - last_err_log >= 60:
+                    log.warning(
+                        "อ่าน log '%s' ไม่ได้ (%s): %s — service รันเป็น SYSTEM จะอ่านได้",
+                        channel,
+                        source,
+                        exc,
+                    )
+                    last_err_log = now
+                if handle is not None:
+                    try:
+                        win32evtlog.CloseEventLog(handle)
+                    except Exception:
+                        pass
+                    handle = None
+                stop_event.wait(retry_wait)
                 continue
-            events = win32evtlog.ReadEventLog(
-                handle,
-                win32evtlog.EVENTLOG_BACKWARDS_READ
-                | win32evtlog.EVENTLOG_SEQUENTIAL_READ,
-                0,
-            )
-            for evt in events:
-                if evt.RecordNumber <= last_record:
-                    continue
-                last_record = max(last_record, evt.RecordNumber)
-                try:
-                    handler(evt)
-                except Exception:
-                    log.exception("parse event (%s) ล้มเหลว", source)
-        except win32api.error as exc:
-            now = time.time()
-            if now - last_err_log >= 60:
-                log.warning(
-                    "อ่าน log '%s' ไม่ได้ (%s): %s — service รันเป็น SYSTEM จะอ่านได้",
-                    channel,
-                    source,
-                    exc,
-                )
-                last_err_log = now
-            if handle is not None:
-                try:
-                    win32evtlog.CloseEventLog(handle)
-                except Exception:
-                    pass
-                handle = None
-            stop_event.wait(retry_wait)
-            continue
-        except Exception:
-            log.exception("eventlog watcher (%s) error", source)
-        stop_event.wait(poll_interval)
+            except Exception:
+                log.exception("eventlog watcher (%s) error", source)
+            stop_event.wait(poll_interval)
+    finally:
+        if handle is not None:
+            try:
+                win32evtlog.CloseEventLog(handle)
+            except Exception:
+                pass
 
 
 class FileTailer:
@@ -230,26 +293,23 @@ class SecurityEngine(BaseEngine):
         eid = evt.EventID & 0xFFFF
         ins = list(evt.StringInserts or [])
         if eid == 4625:
-            try:
-                logon_type = int(ins[3]) if len(ins) > 3 else 0
-            except (TypeError, ValueError):
-                logon_type = 0
-            ip = ins[5].strip() if len(ins) > 5 else "-"
             self._emit(
                 "fail",
-                ip=ip,
-                user=ins[0] if len(ins) > 0 else "-",
-                domain=ins[1] if len(ins) > 1 else "-",
-                logon_type=logon_type,
+                ip=_find_ip(ins, (14, 5)),
+                user=_pick_user(ins, 6, 0),
+                domain=_pick_user(ins, 7, 1),
+                logon_type=_find_logon_type(ins),
                 event_id=4625,
             )
         elif eid == 4624:
-            try:
-                logon_type = int(ins[3]) if len(ins) > 3 else 0
-            except (TypeError, ValueError):
-                logon_type = 0
-            ip = ins[5].strip() if len(ins) > 5 else "-"
-            self._emit("success", ip=ip, user=ins[0] if len(ins) > 0 else "-", logon_type=logon_type, event_id=4624)
+            self._emit(
+                "success",
+                ip=_find_ip(ins, (12, 5)),
+                user=_pick_user(ins, 6, 0),
+                domain=_pick_user(ins, 7, 1),
+                logon_type=_find_logon_type(ins),
+                event_id=4624,
+            )
         elif eid == 4776:
             self._emit("ntlm", user=ins[1] if len(ins) > 1 else "-", event_id=4776)
 
@@ -299,11 +359,6 @@ class MSSQLEngine(BaseEngine):
     def _handle(self, evt):
         if (evt.EventID & 0xFFFF) != 18456:
             return
-        try:
-            if evt.SourceName not in ("MSSQLSERVER", "MSSQL$", "SQLServer"):
-                pass
-        except Exception:
-            pass
         msg = _evt_message(evt)
         m = re.search(r"CLIENT:\s*(" + IP_PATTERN + r")", msg, re.IGNORECASE)
         if not m:
@@ -344,6 +399,7 @@ class IISEngine(BaseEngine):
         super().__init__(cfg, callback, poll_interval)
         self._tailers = []
         self._known = set()
+        self._indices = {}
 
     def enabled(self, cfg=None):
         from . import config as config_mod
@@ -372,40 +428,60 @@ class IISEngine(BaseEngine):
         for path in paths:
             if path not in self._known:
                 self._known.add(path)
-                tailer = FileTailer(path, self._handle_line, tail_from_end=True)
+                tailer = FileTailer(path, lambda line, _p=path: self._handle_line(line, _p), tail_from_end=True)
                 self._tailers.append(tailer)
                 log.info("iis engine: เฝ้า %s", path)
 
-    def _handle_line(self, line):
+    def _handle_line(self, line, path):
         line = line.strip()
+        if line.startswith("#Fields:"):
+            names = _w3c_fields(line[len("#Fields:") :].strip())
+            self._indices[path] = {name: i for i, name in enumerate(names)}
+            return
         if not line or line.startswith("#"):
             return
         f = _w3c_fields(line)
-        if len(f) < 10:
+        idx = self._indices.get(path) or _DEFAULT_W3C_INDEX
+        if len(f) <= max(idx.values()):
             return
         try:
-            idx = self._field_index.get("sc-status", 11)
-            status = f[idx]
-        except Exception:
+            status = f[idx["sc-status"]]
+        except (KeyError, IndexError):
             return
-        ip = f[self._field_index.get("c-ip", 9)]
-        user = f[self._field_index.get("cs-username", 8)]
+        ip = f[idx["c-ip"]] if idx.get("c-ip") is not None and idx["c-ip"] < len(f) else "-"
+        user = f[idx["cs-username"]] if idx.get("cs-username") is not None and idx["cs-username"] < len(f) else ""
         if status == "401":
             self._emit("fail", ip=ip, user=user)
         elif status == "200":
             self._emit("success", ip=ip, user=user)
 
-    _field_index = {
-        "date": 0, "time": 1, "s-ip": 2, "cs-method": 3, "cs-uri-stem": 4,
-        "cs-uri-query": 5, "s-port": 6, "cs-username": 7, "c-ip": 8,
-        "cs(User-Agent)": 9, "sc-status": 10, "sc-substatus": 11, "sc-win32-status": 12,
-    }
+
+_DEFAULT_W3C_INDEX = {
+    "date": 0,
+    "time": 1,
+    "s-ip": 2,
+    "cs-method": 3,
+    "cs-uri-stem": 4,
+    "cs-uri-query": 5,
+    "s-port": 6,
+    "cs-username": 7,
+    "c-ip": 8,
+    "cs(User-Agent)": 9,
+    "sc-status": 10,
+    "sc-substatus": 11,
+    "sc-win32-status": 12,
+}
 
 
 class MySQLEngine(BaseEngine):
     """MySQL error log — "Access denied for user 'x'@'IP'" """
 
     name = "mysql"
+
+    def __init__(self, cfg, callback, poll_interval=3.0):
+        super().__init__(cfg, callback, poll_interval)
+        self._tailers = []
+        self._known = set()
 
     def enabled(self, cfg=None):
         from . import config as config_mod
@@ -415,29 +491,28 @@ class MySQLEngine(BaseEngine):
     def _run(self):
         while not self._stop.wait(self.poll_interval):
             try:
-                for tailer in self._tailers():
+                self._refresh_tailers()
+                for tailer in self._tailers:
                     tailer.poll()
             except Exception:
                 log.exception("mysql engine error")
 
-    def _tailers(self):
+    def _refresh_tailers(self):
         from . import config as config_mod
 
         candidate = config_mod.get(self.cfg, "engines", "mysql_log_dir", "").strip()
         patterns = [r"C:\ProgramData\MySQL\*\Data\*.err"]
         if candidate:
             patterns.insert(0, candidate)
-        paths = []
+        paths = set()
         for p in patterns:
-            paths.extend(glob.glob(p))
-        seen = set()
-        tailers = []
-        for path in sorted(set(paths)):
-            if path in seen:
-                continue
-            seen.add(path)
-            tailers.append(FileTailer(path, self._handle_line, tail_from_end=True))
-        return tailers
+            paths.update(glob.glob(p))
+        for path in sorted(paths):
+            if path not in self._known:
+                self._known.add(path)
+                tailer = FileTailer(path, self._handle_line, tail_from_end=True)
+                self._tailers.append(tailer)
+                log.info("mysql engine: เฝ้า %s", path)
 
     def _handle_line(self, line):
         m = re.search(r"Access denied for user '[^']*'@'(" + IP_PATTERN + r")'", line)
@@ -455,6 +530,11 @@ class GenericEngine(BaseEngine):
 
     name = "generic"
 
+    def __init__(self, cfg, callback, poll_interval=3.0):
+        super().__init__(cfg, callback, poll_interval)
+        self._tailers = []
+        self._seen = set()
+
     def enabled(self, cfg=None):
         from . import config as config_mod
 
@@ -469,7 +549,7 @@ class GenericEngine(BaseEngine):
             part = part.strip()
             if not part:
                 continue
-            name, _, rest = part.partition("|")
+            name, _, rest = part.partition("=")
             path, _, pattern = rest.partition("|")
             name = name.strip() or "generic"
             path = path.strip()
@@ -490,22 +570,27 @@ class GenericEngine(BaseEngine):
     def _run(self):
         while not self._stop.wait(self.poll_interval):
             try:
-                for tailer in self._tailers():
+                self._refresh_tailers()
+                for tailer in self._tailers:
                     tailer.poll()
             except Exception:
                 log.exception("generic engine error")
 
-    def _tailers(self):
-        tailers = []
-        seen = set()
-        for name, path, regex in self._entries():
-            if path in seen:
-                continue
-            seen.add(path)
-            tailers.append(
-                FileTailer(path, lambda line, _n=name, _r=regex: self._handle_line(line, _n, _r), tail_from_end=True)
-            )
-        return tailers
+    def _refresh_tailers(self):
+        entries = self._entries()
+        active_paths = set()
+        for name, path, regex in entries:
+            active_paths.add(path)
+            if path not in self._seen:
+                self._seen.add(path)
+                tailer = FileTailer(
+                    path,
+                    lambda line, _n=name, _r=regex: self._handle_line(line, _n, _r),
+                    tail_from_end=True,
+                )
+                self._tailers.append(tailer)
+                log.info("generic engine: เฝ้า %s (%s)", path, name)
+        self._tailers = [t for t in self._tailers if t.path in active_paths]
 
     def _handle_line(self, line, name, regex):
         m = regex.search(line)
@@ -546,9 +631,12 @@ def source_status(cfg):
     except Exception:
         status["rdp"] = "error"
 
-    status["openssh"] = (
-        "ok" if channel_ok("OpenSSH/Operational") else "no-source"
-    ) if enabled("openssh") else "disabled"
+    try:
+        status["openssh"] = (
+            "ok" if channel_ok("OpenSSH/Operational") else "no-source"
+        ) if enabled("openssh") else "disabled"
+    except Exception:
+        status["openssh"] = "no-source" if enabled("openssh") else "disabled"
     status["mssql"] = (
         "ok" if channel_ok("Application") else "error"
     ) if enabled("mssql") else "disabled"

@@ -96,6 +96,23 @@ block_hours = 24
 auto_extend = true
 ; ข้าม IP ในวง LAN/loopback/เครื่องตัวเอง (กันบล็อกผู้ดูแลเอง)
 skip_local_ips = true
+; กันบล็อก IP ที่ล็อกอินสำเร็จภายในกี่นาทีที่ผ่านมา (ป้องกันบล็อกผู้ดูแลเอง
+; ที่กำลังต่อ RDP อยู่) — 0 = ปิด
+active_session_grace_minutes = 30
+; รายการ IP/CIDR ที่ห้ามบล็อกเด็ดขาด (คั่น ,) — เหมือน whitelist แต่แก้ใน
+; config ตรง ๆ ได้เมื่อฉุกเฉิน (เช่น ถูกล็อกตัวเอง)
+never_block_ips =
+; --- ขยายบล็อก IP ขาประจำ (repeat offender) ---
+; IP ที่โดนบล็อกครบกี่ครั้ง (ภายใน escalation_window_days) ถึงจะขยายการบล็อก
+; (เช่น โดนบล็อก 3 ครั้งแล้วยังกลับมาอีก -> ครั้งที่ 4 ขยายเป็น escalate_block_hours)
+; 0 = ปิด (บล็อก-ปลดตามปกติตลอด)
+escalate_after_blocks = 3
+; ขยายเป็นกี่ชั่วโมง (ค่าเริ่มต้น 7 วัน = 168)
+escalate_block_hours = 168
+; ขยายเป็นบล็อกถาวรเลย (แทน escalate_block_hours) — ต้องปลดด้วยมือ
+escalate_to_permanent = false
+; กรอบเวลานับจำนวนครั้งที่โดนบล็อก (วัน)
+escalation_window_days = 30
 
 [engines]
 ; Engine เพิ่มเติม (security/RDP เปิดถาวร) — เปิด/ปิดแต่ละตัวได้
@@ -172,8 +189,10 @@ def load_config():
 
 
 def save_config(parser):
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+    tmp_file = CONFIG_FILE + ".tmp"
+    with open(tmp_file, "w", encoding="utf-8") as f:
         parser.write(f)
+    os.replace(tmp_file, CONFIG_FILE)
 
 
 def get(parser, section, key, fallback=""):
@@ -205,10 +224,15 @@ def get_list(parser, section, key, fallback=None):
 
 
 def setup_logging(level_name="INFO"):
+    from logging.handlers import RotatingFileHandler
+
     level = getattr(logging, str(level_name).upper(), logging.INFO)
     handlers = [logging.StreamHandler(sys.stdout)]
     try:
-        handlers.append(logging.FileHandler(LOG_FILE, encoding="utf-8"))
+        file_handler = RotatingFileHandler(
+            LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8"
+        )
+        handlers.append(file_handler)
     except Exception:
         pass
     logging.basicConfig(

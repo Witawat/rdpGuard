@@ -64,6 +64,23 @@ def _now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _ip_matches(entry, ip):
+    """match แบบ IP เดี่ยว หรือ CIDR (เช่น 192.168.1.0/24)"""
+    entry = (entry or "").strip()
+    if not entry:
+        return False
+    if entry == ip:
+        return True
+    if "/" in entry:
+        try:
+            import ipaddress
+
+            return ipaddress.ip_address(ip) in ipaddress.ip_network(entry, strict=False)
+        except ValueError:
+            return False
+    return False
+
+
 def _parse_iso(value):
     try:
         return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
@@ -108,6 +125,10 @@ class Database:
             "INSERT INTO events(ts, kind, ip, user, domain, logon_type, source) VALUES(?,?,?,?,?,?,?)",
             (_now_iso(), kind, ip or "", user or "", domain or "", int(logon_type or 0), source or ""),
         )
+
+    def delete_events_by_user(self, user):
+        """ลบเหตุการณ์ที่มี user ระบุ (ใช้ล้างเหตุการณ์จาก self-test)"""
+        self._execute("DELETE FROM events WHERE user=?", (user,))
 
     def recent_events(self, limit=100):
         return self._query(
@@ -196,7 +217,31 @@ class Database:
         return None
 
     def is_whitelisted(self, ip):
-        return bool(self._query("SELECT 1 AS x FROM whitelist WHERE ip=?", (ip,)))
+        rows = self._query("SELECT ip FROM whitelist")
+        return any(_ip_matches(row["ip"], ip) for row in rows)
+
+    def is_blacklisted(self, ip):
+        rows = self._query("SELECT ip FROM blacklist")
+        return any(_ip_matches(row["ip"], ip) for row in rows)
+
+    def recent_success(self, ip, minutes=30):
+        """มีล็อกอินสำเร็จ (4624) จาก IP นี้ภายในกี่นาทีล่าสุดไหม"""
+        since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        row = self._query(
+            "SELECT COUNT(*) AS n FROM events WHERE kind='success' AND ip=? AND ts >= ?",
+            (ip, since),
+        )
+        return row[0]["n"] > 0
+
+    def count_prior_blocks(self, ip, since_iso):
+        """จำนวนครั้งที่ IP นี้เคยโดนบล็อก (จากประวัติ blocked_history) ตั้งแต่ since_iso"""
+        row = self._query(
+            "SELECT COUNT(*) AS n FROM blocked_history WHERE ip=? AND created >= ?",
+            (ip, since_iso),
+        )
+        return row[0]["n"]
 
     def add_whitelist(self, ip, note=""):
         try:
