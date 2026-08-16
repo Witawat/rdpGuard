@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Build (PyInstaller)
+build/
+dist/
+
+# Runtime data (ไม่ควร commit — ถูกสร้างตอนรันที่ %ProgramData%\RDPGuard)
+*.db
+*.log
+
+# Playwright UI test artifacts
+.playwright-mcp/
+
+# IDE
+.vscode/
+.idea/

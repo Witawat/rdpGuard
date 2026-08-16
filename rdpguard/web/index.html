@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RDPGuard</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div id="login-view" class="login-wrap" style="display:none">
+  <div class="login-box">
+    <div class="logo"><span class="shield">&#128737;</span> RDPGuard</div>
+    <div class="tagline">RDP brute-force protection</div>
+    <div class="field">
+      <label>รหัสผ่าน</label>
+      <input type="password" id="login-password" autocomplete="current-password">
+    </div>
+    <button class="primary" id="login-btn">เข้าสู่ระบบ</button>
+    <div class="error" id="login-error"></div>
+  </div>
+</div>
+
+<div id="wizard-view" class="wizard-wrap" style="display:none">
+  <div class="wizard-box">
+    <div class="wizard-head">
+      <div class="logo"><span class="shield">&#128737;</span> RDPGuard</div>
+      <div class="wizard-title" id="wz-title">ตั้งค่าระบบครั้งแรก</div>
+    </div>
+
+    <div class="wizard-body">
+      <div class="wizard-step" id="wz-step-0">
+        <h3>ยินดีต้อนรับ</h3>
+        <p>RDPGuard จะเฝ้าดูการล็อกอิน RDP ของเครื่องนี้ หากพบ IP ใดพยายามเดารหัสผ่านซ้ำ ๆ
+           (ค่าเริ่มต้น: 5 ครั้งใน 10 นาที) ระบบจะ<b>บล็อก IP นั้นด้วย Windows Firewall อัตโนมัติ</b>
+           และปลดให้เองเมื่อครบกำหนดเวลา</p>
+        <p>ตั้งค่าคร่าว ๆ 4 ขั้นตอน ใช้เวลาไม่ถึง 1 นาที</p>
+        <div class="wizard-note">
+          แนะนำ: ถ้าต้องการให้เฝ้าระวังตลอด 24 ชม. แม้ปิดหน้าต่างนี้
+          ให้ปิดโปรแกรมแล้วติดตั้งเป็น Windows Service ด้วย <span class="mono">install.bat</span>
+        </div>
+      </div>
+
+      <div class="wizard-step" id="wz-step-1" style="display:none">
+        <h3>การตรวจจับ</h3>
+        <p class="wz-hint">ตั้งความไวของการบล็อก — ยิ่งน้อยยิ่งกันเร็ว แต่เสี่ยงบล็อกคนที่พิมพ์รหัสผิดเอง</p>
+        <div class="field"><label>จำนวนครั้งที่ล้มเหลว (ต่อ IP)</label><input type="number" id="wz-attempts" min="1" max="100" style="width:110px"></div>
+        <div class="field"><label>กรอบเวลา (นาที)</label><input type="number" id="wz-window" min="1" max="1440" style="width:110px"></div>
+        <div class="field"><label>บล็อกนาน (ชั่วโมง, 0 = ถาวร)</label><input type="number" id="wz-hours" min="0" max="8760" style="width:110px"></div>
+        <div class="field"><label>ข้าม IP ในวง LAN/เครื่องตัวเอง</label>
+          <span class="check"><input type="checkbox" id="wz-skip-local" checked></span></div>
+      </div>
+
+      <div class="wizard-step" id="wz-step-2" style="display:none">
+        <h3>Web UI</h3>
+        <p class="wz-hint">หน้าเว็บสำหรับดูสถานะและจัดการ — เปิดเฉพาะเครื่องนี้ (127.0.0.1) ปลอดภัยที่สุด</p>
+        <div class="field"><label>Host</label><input type="text" id="wz-host" class="mono" style="width:180px"></div>
+        <div class="field"><label>พอร์ต</label><input type="number" id="wz-port" min="1" max="65535" style="width:110px"></div>
+        <div class="field"><label>รหัสผ่าน (เว้นว่าง = คงรหัสเดิม)</label><input type="text" id="wz-password" class="mono" style="width:220px" placeholder="เว้นว่างเพื่อคงเดิม"></div>
+      </div>
+
+      <div class="wizard-step" id="wz-step-3" style="display:none">
+        <h3>พร้อมใช้งาน</h3>
+        <p>สรุปการตั้งค่า:</p>
+        <div class="wz-summary" id="wz-summary"></div>
+        <p class="wz-hint">กด "เสร็จสิ้น" เพื่อบันทึกและเริ่มเฝ้าระวังทันที (จะเข้า dashboard อัตโนมัติ)</p>
+      </div>
+    </div>
+
+    <div class="wizard-foot">
+      <button id="wz-prev" style="display:none">ย้อนกลับ</button>
+      <div class="spacer"></div>
+      <button id="wz-skip" class="ghost-btn">ข้ามการตั้งค่า</button>
+      <button id="wz-next" class="primary big">ถัดไป</button>
+      <button id="wz-finish" class="primary big" style="display:none">เสร็จสิ้น — เริ่มใช้งาน</button>
+    </div>
+    <div class="wizard-dots" id="wz-dots"></div>
+  </div>
+</div>
+
+<div id="app-view" style="display:none">
+  <header class="top">
+    <div class="logo"><span class="shield">&#128737;</span> RDPGuard</div>
+    <span class="pill" id="pill-monitor"><span class="dot"></span><span id="pill-monitor-text">กำลังโหลด...</span></span>
+    <span class="pill info" id="pill-context"></span>
+    <span class="pill ghost mono" id="pill-version"></span>
+    <div class="spacer"></div>
+    <a class="logout" id="logout-btn" href="#">ออกจากระบบ</a>
+  </header>
+
+  <main>
+    <div class="cards">
+      <div class="card"><div class="label">ล็อกอินล้มเหลว (24 ชม.)</div><div class="value danger" id="stat-failed">-</div></div>
+      <div class="card"><div class="label">ล็อกอินสำเร็จ (24 ชม.)</div><div class="value ok" id="stat-success">-</div></div>
+      <div class="card"><div class="label">IP กำลังถูกบล็อก</div><div class="value" id="stat-active">-</div></div>
+      <div class="card"><div class="label">บล็อกทั้งหมด</div><div class="value" id="stat-total">-</div></div>
+      <div class="card"><div class="label">กฎที่ตั้ง</div><div class="sub mono" id="stat-rule-desc">max 5 ครั้ง / 10 นาที / 24 ชม.</div></div>
+    </div>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>การตรวจจับ</h2>
+        <div class="spacer"></div>
+        <span class="hint">กดเพื่อเปิด/ปิดได้ทันที (มีผลทันที ไม่ต้อง restart)</span>
+      </div>
+      <div class="panel-body">
+        <div class="det-row">
+          <div class="det-master">
+            <span class="det-label">เฝ้าระวังทั้งหมด</span>
+            <button class="switch" id="det-master" role="switch" aria-checked="true" title="เปิด/ปิดการตรวจจับทั้งหมด"></button>
+          </div>
+          <div class="det-engines">
+            <span class="chip on" data-engine="rdp" title="Security log 4625 — เปิดถาวร">RDP</span>
+            <span class="chip" data-engine="openssh">OpenSSH</span>
+            <span class="chip" data-engine="mssql">MSSQL</span>
+            <span class="chip" data-engine="iis">IIS Web</span>
+            <span class="chip" data-engine="mysql">MySQL</span>
+            <span class="chip" data-engine="generic">Generic</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>สถานะระบบ (ส่วนประกอบสำคัญ)</h2>
+        <div class="spacer"></div>
+        <span class="hint">บอกว่าของที่ต้องใช้ทำงานได้จริงหรือไม่</span>
+      </div>
+      <div class="panel-body">
+        <table class="health-table">
+          <thead><tr><th>ส่วนประกอบ</th><th>สถานะ</th><th>รายละเอียด</th></tr></thead>
+          <tbody id="health-tbody"></tbody>
+        </table>
+        <div class="add-row" style="margin-top:0.7rem">
+          <button class="primary" id="fw-test-btn">ทดสอบบล็อกจริง (firewall)</button>
+          <span class="hint" id="fw-test-msg"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Windows Service</h2>
+        <div class="spacer"></div>
+        <span class="hint">รันเป็น service = เฝ้าระวังตลอด 24 ชม. แม้ปิดหน้าต่าง/ไม่มีใครล็อกอิน</span>
+      </div>
+      <div class="panel-body">
+        <div class="svc-row">
+          <div class="svc-info">
+            <div class="svc-status-line">
+              <span class="pill" id="svc-pill"><span class="dot"></span><span id="svc-pill-text">กำลังโหลด...</span></span>
+              <span id="svc-state"></span>
+            </div>
+            <div class="svc-ctx" id="svc-ctx"></div>
+          </div>
+          <div class="svc-buttons">
+            <button id="svc-install" title="ติดตั้ง Windows Service (ต้อง admin)">ติดตั้ง</button>
+            <button id="svc-start" title="เริ่ม service">เริ่ม</button>
+            <button id="svc-stop" title="หยุด service">หยุด</button>
+            <button id="svc-restart" title="รีสตาร์ท service">รีสตาร์ท</button>
+            <button class="danger" id="svc-remove" title="ถอนการติดตั้ง service">ถอน</button>
+          </div>
+        </div>
+        <div class="svc-note" id="svc-note"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>เหตุการณ์ล่าสุด</h2>
+        <div class="spacer"></div>
+        <span class="hint" id="events-count"></span>
+      </div>
+      <div class="panel-body" style="max-height:420px; overflow:auto">
+        <table id="events-table">
+          <thead><tr><th>เวลา (UTC)</th><th>IP</th><th>ผู้ใช้</th><th>โดเมน</th><th>LogonType</th><th>แหล่ง</th><th>ประเภท</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="empty" id="events-empty" style="display:none">ยังไม่มีเหตุการณ์</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>IP ที่ถูกบล็อก</h2>
+        <div class="spacer"></div>
+        <span class="hint">หมดอายุอัตโนมัติตามเวลาที่ตั้ง</span>
+      </div>
+      <div class="panel-body">
+        <div class="add-row">
+          <input type="text" id="block-ip" class="mono" placeholder="IP หรือ CIDR เช่น 203.0.113.9">
+          <input type="number" id="block-hours" value="24" min="0" step="1" style="width:90px" title="ชั่วโมง (0 = ถาวร)">
+          <button class="primary" id="block-btn">บล็อกด้วยมือ</button>
+        </div>
+        <table id="blocked-table">
+          <thead><tr><th>IP</th><th>ประเทศ</th><th>เหตุผล</th><th>ที่มา</th><th>บล็อกเมื่อ (UTC)</th><th>หมดอายุ (UTC)</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="empty" id="blocked-empty" style="display:none">ยังไม่มี IP ถูกบล็อก</div>
+      </div>
+    </section>
+
+    <div class="two-col">
+      <section class="panel">
+        <div class="panel-head"><h2>Whitelist</h2><div class="spacer"></div><span class="hint">ไม่บล็อกเด็ดขาด</span></div>
+        <div class="panel-body">
+          <div class="add-row">
+            <input type="text" id="wl-ip" class="mono" placeholder="IP หรือ CIDR">
+            <button class="primary" id="wl-add">เพิ่ม</button>
+          </div>
+          <table id="wl-table">
+            <thead><tr><th>IP</th><th>ประเทศ</th><th>หมายเหตุ</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div class="empty" id="wl-empty" style="display:none">ว่างเปล่า</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Blacklist</h2><div class="spacer"></div><span class="hint">บล็อกทันที</span></div>
+        <div class="panel-body">
+          <div class="add-row">
+            <input type="text" id="bl-ip" class="mono" placeholder="IP หรือ CIDR">
+            <button class="primary" id="bl-add">เพิ่ม</button>
+          </div>
+          <table id="bl-table">
+            <thead><tr><th>IP</th><th>ประเทศ</th><th>หมายเหตุ</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div class="empty" id="bl-empty" style="display:none">ว่างเปล่า</div>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>ตั้งค่า</h2>
+        <div class="spacer"></div>
+        <span class="hint">บันทึกแล้วมีผลทันที (host/พอร์ต Web UI ต้อง restart service)</span>
+      </div>
+      <div class="panel-body">
+        <div class="settings-grid" id="settings-grid"></div>
+        <div style="margin-top:14px; display:flex; gap:10px; align-items:center">
+          <button class="primary" id="settings-save">บันทึกการตั้งค่า</button>
+          <span class="hint" id="settings-msg"></span>
+        </div>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Log การทำงาน</h2>
+        <div class="spacer"></div>
+        <span class="hint" id="log-file-hint"></span>
+        <button class="small" id="log-refresh">โหลดใหม่</button>
+      </div>
+      <div class="panel-body">
+        <pre class="log-view" id="log-view">กำลังโหลด...</pre>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="toast-wrap" id="toasts"></div>
+<script src="/app.js"></script>
+</body>
+</html>
