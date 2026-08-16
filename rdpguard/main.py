@@ -236,6 +236,12 @@ def _cmd_password(args):
 
 
 def main(argv=None):
+    # console ไทย/อังกฤษ: บังคับ UTF-8 ออกหน้าจอ กัน UnicodeEncodeError (cp874/cp437 ไม่มีอักขระพิเศษ)
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
     argv = sys.argv[1:] if argv is None else argv
     if not argv:
         print(f"RDPGuard v{__version__} — เริ่มเฝ้าระวัง + เปิด Web UI...")

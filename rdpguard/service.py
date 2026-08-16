@@ -154,7 +154,15 @@ def remove_service():
         win32serviceutil.StopService(SERVICE_NAME)
     except Exception:
         pass
-    win32serviceutil.RemoveService(SERVICE_NAME)
+    try:
+        win32serviceutil.RemoveService(SERVICE_NAME)
+    except Exception as exc:
+        code = getattr(exc, "winerror", None)
+        if code == 1060:  # service ไม่มีอยู่ — ไม่ใช่ความผิด
+            return "service ยังไม่ได้ติดตั้ง — ไม่มีอะไรต้องลบ"
+        if code == 5:  # Access denied
+            return "ไม่มีสิทธิ์ลบ service - ต้องรันด้วย administrator (คลิกขวา > Run as administrator)"
+        raise
     return f"ลบ service '{SERVICE_NAME}' เรียบร้อย"
 
 

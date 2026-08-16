@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.6 (2026-08-16)
+
+- **แก้ `uninstall.bat`**: ESC literal → `prompt $E` (กัน cmd parse พังข้ามเครื่อง เหมือน build.bat) — พร้อมเทสต์จริงครบ flow
+- **`remove service` ไม่ traceback อีกต่อไป**: ตอน service ไม่ติดตั้ง → คืน "service ยังไม่ได้ติดตั้ง"; ตอนไม่มีสิทธิ์ → คืนคำแนะนำรัน admin (เดิม exception หลุด → uninstall.bat แสดง "[x] Failed" ผิด ๆ ทั้งที่ไม่มีอะไรต้องทำ)
+- **console UTF-8**: `run.py` บังคับ stdout/stderr utf-8 — กัน UnicodeEncodeError (cp874/cp437) เวลาพิมพ์ข้อความที่มีอักขระพิเศษ
+
 ## 1.5.5 (2026-08-16)
 
 - **พาเนล Session / Remote กลับมาทำงานครบทุกเครื่อง** — ลบ PowerShell CIM fallback (Norton Behavioral ฟลาก `powershell.exe` + embedded script base64 เป็น `IDP.HELU.PSE...` — pattern ที่ malware ใช้จริง) → เปลี่ยนเป็น **WTS API (win32ts)** ตรง ๆ แทน: เป็น DLL call ใน process ตัวเอง ไม่ spawn process ภายนอก — ใช้งานได้บนเครื่องที่ไม่มี `qwinsta` (Win11 บางรุ่น) และ Norton ไม่มีอะไรให้ฟลาก

@@ -3,7 +3,8 @@ chcp 65001 >nul
 setlocal
 title RDPGuard - Uninstall
 
-set "ESC="
+rem วิธีอ่าน ESC จาก prompt $E (ไม่ฝัง literal 0x1B ลงไฟล์ — กัน cmd parse พัง)
+for /f %%a in ('echo prompt $E ^| cmd') do set "ESC=%%a"
 set "GRN=%ESC%[92m"
 set "YEL=%ESC%[93m"
 set "RED=%ESC%[91m"
