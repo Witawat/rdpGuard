@@ -100,6 +100,8 @@ python run.py password
 
 เปลี่ยนค่าการเฝ้าระวัง/ตรวจจับ/firewall/web UI ได้จากหน้าเว็บ กด **บันทึกการตั้งค่า** แล้วมีผลทันที (service โหลด config ใหม่เอง โดยไม่ต้อง restart)
 
+> ตั้งค่า **Generic engine** (ไฟล์ log ของโปรแกรมอื่น + regex เอง เช่น MailEnable/SmarterMail/PBX) ดูตัวอย่างโปรแกรมจริงและวิธีทดสอบ regex ได้ที่ **[GENERIC.md](GENERIC.md)**
+
 ## CLI
 
 ทุกคำสั่งใช้ผ่าน `python run.py <คำสั่ง>` หรือ `python -m rdpguard <คำสั่ง>` (รันจากโฟลเดอร์โปรเจกต์) ถ้าสร้าง exe แล้วใช้ `rdpguard.exe <คำสั่ง>`

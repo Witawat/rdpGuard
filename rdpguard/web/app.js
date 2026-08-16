@@ -733,6 +733,23 @@ const SETTINGS_UI = {
       { key: "logon_types", label: "LogonType ที่นับ (3,10 หรือ *)", type: "text" },
     ],
   },
+  firewall: {
+    title: "Windows Firewall",
+    fields: [
+      { key: "single_rule", label: "ใช้ rule เดียวรวมทุก IP (แบบ RDPGuard)", type: "bool" },
+      { key: "rule_prefix", label: "คำนำหน้าชื่อ rule", type: "text" },
+      { key: "profile", label: "Profile", type: "select", options: ["any", "domain", "private", "public"] },
+      { key: "blocked_ports", label: "จำกัดพอร์ตที่บล็อก (ว่าง = ทุกพอร์ต)", type: "text" },
+    ],
+  },
+  webui: {
+    title: "Web UI",
+    fields: [
+      { key: "host", label: "Host (127.0.0.1 = เฉพาะเครื่องนี้)", type: "text" },
+      { key: "port", label: "พอร์ต", type: "int" },
+      { key: "password", label: "รหัสผ่าน (เว้นว่าง = สุ่มใหม่)", type: "text" },
+    ],
+  },
   detection: {
     title: "การตรวจจับ",
     fields: [
@@ -752,15 +769,6 @@ const SETTINGS_UI = {
       { key: "accumulate_block_hours", label: "ตัวนับสะสม: บล็อกนาน (ชั่วโมง)", type: "int" },
     ],
   },
-  firewall: {
-    title: "Windows Firewall",
-    fields: [
-      { key: "single_rule", label: "ใช้ rule เดียวรวมทุก IP (แบบ RDPGuard)", type: "bool" },
-      { key: "rule_prefix", label: "คำนำหน้าชื่อ rule", type: "text" },
-      { key: "profile", label: "Profile", type: "select", options: ["any", "domain", "private", "public"] },
-      { key: "blocked_ports", label: "จำกัดพอร์ตที่บล็อก (ว่าง = ทุกพอร์ต)", type: "text" },
-    ],
-  },
   engines: {
     title: "Engine เพิ่มเติม (ตรวจจับโปรโตคอลอื่น)",
     fields: [
@@ -776,18 +784,91 @@ const SETTINGS_UI = {
       { key: "generic_max_attempts", label: "Generic: จำนวนครั้ง", type: "text" },
       { key: "iis_log_dir", label: "โฟลเดอร์ IIS log (ว่าง = auto)", type: "text" },
       { key: "mysql_log_dir", label: "โฟลเดอร์ MySQL log (ว่าง = auto)", type: "text" },
-      { key: "generic_logs", label: "Generic: ชื่อ=path|regex (คั่น ;)", type: "text" },
-    ],
-  },
-  webui: {
-    title: "Web UI",
-    fields: [
-      { key: "host", label: "Host (127.0.0.1 = เฉพาะเครื่องนี้)", type: "text" },
-      { key: "port", label: "พอร์ต", type: "int" },
-      { key: "password", label: "รหัสผ่าน (เว้นว่าง = สุ่มใหม่)", type: "text" },
+      { key: "generic_logs", label: "Generic log engine: ไฟล์ + regex", type: "generic_logs" },
     ],
   },
 };
+
+function parseGenericLogs(value) {
+  return String(value || "")
+    .split(";")
+    .map((part) => {
+      const p = part.trim();
+      if (!p) return null;
+      const eq = p.indexOf("=");
+      const name = (eq >= 0 ? p.slice(0, eq) : p).trim();
+      const rest = eq >= 0 ? p.slice(eq + 1) : "";
+      const bar = rest.indexOf("|");
+      const path = (bar >= 0 ? rest.slice(0, bar) : rest).trim();
+      const regex = bar >= 0 ? rest.slice(bar + 1).trim() : "";
+      return { name, path, regex };
+    })
+    .filter(Boolean);
+}
+
+function renderGenericEditor(box, value) {
+  const hidden = box.querySelector('input[type="hidden"]');
+  const list = document.createElement("div");
+  list.className = "gen-rows";
+  box.appendChild(list);
+
+  const validateRow = (row) => {
+    const path = row.querySelector(".gen-path").value.trim();
+    const regex = row.querySelector(".gen-regex").value.trim();
+    const warns = [];
+    if (regex && (regex.includes("|") || regex.includes(";")))
+      warns.push("regex ห้ามมีอักขระ | หรือ ; (ตัวคั่น config)");
+    if (path && path.includes("=")) warns.push("path ห้ามมี =");
+    if (path && !regex) warns.push("ยังไม่ได้ใส่ regex");
+    if (regex && !path) warns.push("ยังไม่ได้ใส่ path");
+    const w = row.querySelector(".gen-warn");
+    w.textContent = warns.join(" · ");
+    row.classList.toggle("gen-invalid", warns.length > 0);
+  };
+
+  const sync = () => {
+    const parts = [];
+    Array.from(list.children).forEach((row) => {
+      validateRow(row);
+      const name = row.querySelector(".gen-name").value.trim();
+      const path = row.querySelector(".gen-path").value.trim();
+      const regex = row.querySelector(".gen-regex").value.trim();
+      if (name || path || regex) parts.push(`${name || "generic"}=${path}|${regex}`);
+    });
+    hidden.value = parts.join(";");
+  };
+
+  const addRow = (entry) => {
+    const row = document.createElement("div");
+    row.className = "gen-row";
+    row.innerHTML =
+      `<input class="gen-name" placeholder="ชื่อ (เช่น mail)" value="${esc(entry?.name || "")}" title="ป้ายกำกับที่เห็นใน UI">` +
+      `<input class="gen-path" placeholder="C:\\path\\ไฟล์.log" value="${esc(entry?.path || "")}" title="เส้นทางไฟล์ log จริง (ไฟล์เดียว)">` +
+      `<input class="gen-regex" placeholder="regex — ต้องมี {IP} แทนตำแหน่ง IP" value="${esc(entry?.regex || "")}" title="Python regex เช่น AUTH LOGIN failed from {IP}">` +
+      `<button type="button" class="gen-del" title="ลบรายการ">&times;</button>` +
+      `<div class="gen-warn"></div>`;
+    list.appendChild(row);
+    row.querySelectorAll("input").forEach((inp) => inp.addEventListener("input", sync));
+    row.querySelector(".gen-del").addEventListener("click", () => {
+      row.remove();
+      sync();
+    });
+    return row;
+  };
+
+  const entries = parseGenericLogs(value);
+  (entries.length ? entries : [null]).forEach((e) => addRow(e));
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "gen-add";
+  addBtn.textContent = "+ เพิ่มรายการ";
+  addBtn.addEventListener("click", () => {
+    addRow(null);
+    sync();
+  });
+  box.appendChild(addBtn);
+  sync();
+}
 
 async function refreshSettings() {
   try {
@@ -798,6 +879,7 @@ async function refreshSettings() {
     for (const [section, spec] of Object.entries(SETTINGS_UI)) {
       const group = document.createElement("div");
       group.className = "settings-group";
+      group.dataset.sec = section;
       group.innerHTML = `<h3>${spec.title}</h3>`;
       const values = data[section] || {};
       for (const f of spec.fields) {
@@ -809,6 +891,13 @@ async function refreshSettings() {
         } else if (f.type === "select") {
           const opts = f.options.map((o) => `<option ${values[f.key] === o ? "selected" : ""}>${o}</option>`).join("");
           field.innerHTML = `<label>${f.label}</label><select data-sec="${section}" data-key="${f.key}">${opts}</select>`;
+        } else if (f.type === "generic_logs") {
+          field.innerHTML = `<label>${f.label}<span class="gen-hint">รายการละ ชื่อ=path|regex — คั่นหลายรายการด้วย ; ดูตัวอย่างใน GENERIC.md</span></label>`;
+          const box = document.createElement("div");
+          box.className = "gen-editor";
+          box.innerHTML = `<input type="hidden" data-sec="${section}" data-key="${f.key}">`;
+          field.appendChild(box);
+          renderGenericEditor(box, values[f.key] || "");
         } else {
           field.innerHTML = `<label>${f.label}</label><input type="text" data-sec="${section}" data-key="${f.key}" value="${esc(values[f.key] ?? "")}">`;
         }

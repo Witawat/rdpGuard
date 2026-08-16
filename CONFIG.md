@@ -62,7 +62,7 @@ Engine เพิ่มเติม (engine RDP/Security เปิดถาวร
 | `openssh_max_attempts` ฯลฯ | *(ว่าง)* | ขีดจำกัดเฉพาะ engine (ว่าง = ใช้ค่ากลาง `detection.max_attempts`) — มี `mssql_max_attempts`, `iis_max_attempts`, `mysql_max_attempts`, `generic_max_attempts` |
 | `iis_log_dir` | *(ว่าง)* | โฟลเดอร์ IIS log (ว่าง = auto: `C:\inetpub\logs\LogFiles`) |
 | `mysql_log_dir` | *(ว่าง)* | โฟลเดอร์/pattern MySQL log (ว่าง = auto: `C:\ProgramData\MySQL\*\Data\*.err`) |
-| `generic_logs` | *(ว่าง)* | รายการไฟล์ log + regex คั่นด้วย `;` รูปแบบ `ชื่อ=path|regex` — ใช้ `{IP}` แทนตำแหน่ง IP เช่น `mail=C:\MailServer\log.txt|Failed login from '{IP}'` (regex จริงได้ `{IP}` เป็น placeholder) |
+| `generic_logs` | *(ว่าง)* | รายการไฟล์ log + regex คั่นด้วย `;` รูปแบบ `ชื่อ=path|regex` — ใช้ `{IP}` แทนตำแหน่ง IP เช่น `mail=C:\MailServer\log.txt|Failed login from '{IP}'` (regex จริงได้ `{IP}` เป็น placeholder) — **[คู่มือเต็ม + ตัวอย่างโปรแกรมจริง: GENERIC.md](GENERIC.md)** |
 
 > การอ่านไฟล์แบบ tail: ไฟล์ใหม่ที่เจอหลังเปิด engine จะอ่านตั้งแต่ต้น ไฟล์เดิมอ่านต่อจากท้าย (จำ offset) — รองรับ log rotation ผ่านการตรวจ (size, ctime)
 

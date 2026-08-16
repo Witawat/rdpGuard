@@ -20,7 +20,7 @@ RDP brute-force protection สำหรับ Windows Server / Windows Desktop �
   - **MSSQL** — Event 18456 (รองรับ SQL auth ด้วย)
   - **IIS / HTTP Web Login / RD Web forms** — IIS W3C log (HTTP 401)
   - **MySQL** — MySQL error log
-  - **Generic** — ไฟล์ log ของโปรแกรมอื่น (MailEnable/SmarterMail/PBX/SIP ฯลฯ) ตั้ง regex เองได้
+  - **Generic** — ไฟล์ log ของโปรแกรมอื่น (MailEnable/SmarterMail/PBX/SIP ฯลฯ) ตั้ง regex เองได้ — [คู่มือการใช้งานอย่างละเอียด (GENERIC.md)](GENERIC.md)
 - **นับความถี่ต่อ IP ต่อ engine** ภายในกรอบเวลา (ค่าเริ่มต้น 5 ครั้ง/10 นาที) — ตั้งขีดจำกัดแยกต่อ engine ได้
 - **บล็อก IP อัตโนมัติ** — เพิ่ม rule เข้า Windows Firewall (`RDPGuard Block <IP>`) ผ่าน HNetCfg COM API (fallback ด้วย netsh) — **จำกัดเฉพาะพอร์ตได้** (เช่น 3389,1433,22) หรือบล็อกทุกพอร์ต
 - **หมดอายุแล้วปลดเอง** — บล็อกชั่วคราว (ค่าเริ่มต้น 24 ชม.) ปลดบล็อกอัตโนมัติเมื่อหมดเวลา

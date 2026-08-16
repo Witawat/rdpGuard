@@ -153,6 +153,23 @@ input.mono { font-family: "Cascadia Code", Consolas, monospace; }
   border: 1px solid var(--border); border-radius: var(--radius);
   padding: 0.8rem 0.9rem; background: var(--surface); min-width: 0;
 }
+.settings-group.full { grid-column: 1 / -1; }
+/* จอ 2 คอลัมน์: การเฝ้าระวัง/Firewall/Web UI ซ้อนกันซ้าย, การตรวจจับ (ยาว) อยู่ขวา, Engine เต็มแถวล่าง */
+@media (min-width: 980px) {
+  #settings-grid {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "monitor detection"
+      "firewall detection"
+      "webui detection"
+      "engines engines";
+  }
+  .settings-group[data-sec="monitor"] { grid-area: monitor; }
+  .settings-group[data-sec="detection"] { grid-area: detection; }
+  .settings-group[data-sec="firewall"] { grid-area: firewall; }
+  .settings-group[data-sec="webui"] { grid-area: webui; }
+  .settings-group[data-sec="engines"] { grid-area: engines; }
+}
 .settings-group h3 { margin: 0 0 0.65rem; font-size: 0.88rem; color: var(--ink-2); }
 .field {
   display: grid;
@@ -168,6 +185,43 @@ input.mono { font-family: "Cascadia Code", Consolas, monospace; }
 .field input[type="text"] { width: 10rem; }
 .field .check { display: flex; align-items: center; gap: 0.4rem; }
 .check input { accent-color: var(--accent); width: 1.05rem; height: 1.05rem; }
+
+/* ---- Generic log editor (ตั้งค่า generic_logs) ---- */
+.gen-editor { grid-column: 1 / -1; min-width: 0; }
+.gen-hint { display: block; color: var(--muted); font-size: 0.75rem; font-weight: normal; margin-top: 0.15rem; }
+.gen-rows { display: flex; flex-direction: column; gap: 0.4rem; }
+.gen-row {
+  display: grid;
+  grid-template-columns: 7rem minmax(9rem, 1fr) minmax(12rem, 1.7fr) 1.6rem;
+  gap: 0.35rem;
+  align-items: center;
+}
+.gen-row input {
+  width: 100% !important;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 0.78rem;
+  min-width: 0;
+}
+.gen-row input:focus { outline: none; border-color: var(--accent); background: var(--surface); }
+.gen-row.gen-invalid input { border-color: var(--danger); }
+.gen-warn { grid-column: 1 / -1; font-size: 0.72rem; color: var(--danger); line-height: 1.25; }
+.gen-row:not(.gen-invalid) .gen-warn { display: none; }
+.gen-del {
+  border: none; background: transparent; color: var(--muted);
+  font-size: 1.1rem; cursor: pointer; line-height: 1; padding: 0.15rem 0.2rem;
+}
+.gen-del:hover { color: var(--danger); }
+.gen-add {
+  margin-top: 0.45rem; background: var(--surface-2); border: 1px dashed var(--border);
+  color: var(--ink-2); border-radius: 6px; padding: 0.35rem 0.75rem;
+  font-size: 0.8rem; cursor: pointer;
+}
+.gen-add:hover { border-color: var(--accent); color: var(--accent); }
 
 .empty { color: var(--muted); font-size: 0.85rem; padding: 0.9rem 0.25rem; text-align: center; overflow-wrap: anywhere; }
 
