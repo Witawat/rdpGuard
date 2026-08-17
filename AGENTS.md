@@ -18,7 +18,7 @@ build.bat build              # ดาวน์โหลด UPX/ติดตั�
 ## โครงสร้าง
 
 - `rdpguard/config.py` — config INI; `DEFAULT_CONFIG` คือต้นฉบับค่าเริ่มต้น; `ensure_config()` เติม section/คีย์ที่ขาดให้อัตโนมัติ
-- `rdpguard/database.py` — SQLite (events, blocked, blocked_history, accumulate, whitelist, blacklist, geoip_cache)
+- `rdpguard/database.py` — SQLite (events, blocked, blocked_history, accumulate, whitelist, blacklist, geoip_cache, audit_log)
 - `rdpguard/engines.py` — multi-engine: rdp (Security 4625/4624), openssh (Event 4), mssql (18456), iis (W3C), mysql, generic (regex)
 - `rdpguard/detector.py` — นับความถี่ต่อ (engine, IP), บล็อก, grace, escalation, auto-unblock
 - `rdpguard/firewall.py` — HNetCfg COM + netsh fallback; `single_rule=true` (ค่าเริ่มต้น) = rule เดียว `RDPGuard Block` เก็บ IP ใน RemoteAddresses
@@ -55,8 +55,9 @@ build.bat build              # ดาวน์โหลด UPX/ติดตั�
 - เหตุการณ์ "หาย" จากตาราง = UI แสดงแค่ 80 ล่าสุด (ข้อมูลไม่ถูกลบ) · Log แสดง 250/500/1000 บรรทัดและอ่านเฉพาะ 64KB ท้ายไฟล์
 - exe (build ด้วย Python 3.11) รันได้ Windows 8.1+ — Win7 ต้อง build ด้วย Python 3.8
 - ถ้า Telegram ขึ้น `CERTIFICATE_VERIFY_FAILED` จาก HTTPS interception ให้ปิด `telegram_verify_ssl` ในหน้าแจ้งเตือน; ใช้เฉพาะเครือข่ายที่เชื่อถือได้
+- v1.7.0: Events/Blocked/Audit มีตัวกรองและ CSV export · DB มี retention · Backup ล้างค่าลับ · Webhook เป็นช่องทางเสริม
 
 ## แผนพัฒนา (ถัดไป)
 
-- เพิ่ม webhook เป็นช่องทางแจ้งเตือนเพิ่มเติมจาก Telegram/Email
-- เพิ่มตัวกรอง/ค้นหา/ส่งออกเหตุการณ์และ Log ใน Web UI
+- ขยาย Webhook ให้รองรับรูปแบบ payload ของผู้ให้บริการหลัก เช่น Discord/Slack
+- เพิ่มการตั้งค่า HTTPS/reverse proxy สำหรับกรณีเปิด Web UI นอกเครื่อง

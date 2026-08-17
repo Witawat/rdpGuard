@@ -78,6 +78,13 @@ main { max-width: 1200px; margin: 0 auto; padding: 1.3rem 1.4rem 3.5rem; min-wid
 .card .value.danger { color: var(--danger); }
 .card .value.ok { color: var(--ok); }
 .card .sub { font-size: 0.78rem; color: var(--muted); margin-top: 0.15rem; overflow-wrap: anywhere; }
+.trend-panel { margin-top: -0.3rem; }
+.trend-bars { display: flex; align-items: flex-end; justify-content: space-around; gap: 0.8rem; height: 8rem; }
+.trend-day { display: flex; flex: 1 1 0; flex-direction: column; align-items: center; gap: 0.3rem; color: var(--muted); font-size: 0.7rem; height: 100%; }
+.trend-columns { display: flex; align-items: flex-end; justify-content: center; gap: 0.15rem; flex: 1 1 auto; width: 100%; }
+.trend-bar { display: block; width: min(1.2rem, 35%); min-height: 2px; border-radius: 4px 4px 0 0; }
+.trend-bar.fail { background: var(--danger); }
+.trend-bar.success { background: var(--ok); }
 
 section.panel {
   background: var(--surface); border: 1px solid var(--border);
@@ -138,7 +145,7 @@ button.danger:hover { background: var(--danger-soft); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 button.small { padding: 0.2rem 0.65rem; font-size: 0.75rem; }
 
-input[type="text"], input[type="password"], input[type="number"], select {
+input[type="text"], input[type="password"], input[type="number"], input[type="search"], select {
   border: 1px solid var(--border); border-radius: 8px;
   padding: 0.45rem 0.65rem; background: var(--surface); color: var(--ink);
   outline: none;
@@ -149,6 +156,17 @@ input.mono { font-family: "Cascadia Code", Consolas, monospace; }
 .add-row { display: flex; gap: 0.5rem; margin-bottom: 0.65rem; flex-wrap: wrap; }
 .add-row input[type="text"] { flex: 1 1 160px; max-width: 100%; }
 .add-row input.note { flex: 2 1 220px; }
+.filter-row, .bulk-row, .pager {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0.45rem;
+  margin-bottom: 0.65rem;
+}
+.filter-row input[type="search"] { flex: 1 1 190px; min-width: 0; }
+.filter-row select { flex: 0 1 10rem; }
+.bulk-row { justify-content: space-between; color: var(--muted); font-size: 0.78rem; }
+.pager { justify-content: center; margin: 0.7rem 0 0; }
+.pager .hint { min-width: 7rem; text-align: center; }
+.small-check { font-size: 0.76rem; color: var(--muted); white-space: nowrap; }
+.log-search { width: 10rem; }
 
 .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 0.9rem; }
 .settings-group {
@@ -161,12 +179,14 @@ input.mono { font-family: "Cascadia Code", Consolas, monospace; }
   #settings-grid {
     grid-template-columns: 1fr 1fr;
     grid-template-areas:
+      "general detection"
       "monitor detection"
       "firewall detection"
       "webui detection"
       "engines engines"
       "notify notify";
   }
+  .settings-group[data-sec="general"] { grid-area: general; }
   .settings-group[data-sec="monitor"] { grid-area: monitor; }
   .settings-group[data-sec="detection"] { grid-area: detection; }
   .settings-group[data-sec="firewall"] { grid-area: firewall; }
@@ -189,6 +209,12 @@ input.mono { font-family: "Cascadia Code", Consolas, monospace; }
 .field input[type="text"] { width: 10rem; }
 .field .check { display: flex; align-items: center; gap: 0.4rem; }
 .check input { accent-color: var(--accent); width: 1.05rem; height: 1.05rem; }
+.secret-input { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
+.secret-input input { width: 10rem; min-width: 0; }
+.secret-clear.active { color: var(--danger); border-color: var(--danger); }
+.notify-status { font-size: 0.78rem; overflow-wrap: anywhere; }
+.notify-status.ok { color: var(--ok); }
+.notify-status.warn { color: var(--warn); }
 
 /* ---- Generic log editor (ตั้งค่า generic_logs) ---- */
 .gen-editor { grid-column: 1 / -1; min-width: 0; }
@@ -256,6 +282,23 @@ input.mono { font-family: "Cascadia Code", Consolas, monospace; }
 .login-box input { width: 100%; }
 .login-box button { width: 100%; padding: 0.6rem; }
 .login-box .error { color: var(--danger); font-size: 0.78rem; min-height: 1rem; margin-top: 0.5rem; text-align: center; }
+.credit-line, .site-footer-inner {
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+  gap: 0.4rem; color: var(--muted); font-size: 0.72rem; line-height: 1.5;
+}
+.credit-line {
+  margin-top: 1rem; padding-top: 0.8rem; border-top: 1px solid var(--border);
+}
+.credit-line a, .site-footer-inner a {
+  color: var(--accent); text-decoration: none;
+}
+.credit-line a:hover, .site-footer-inner a:hover { text-decoration: underline; }
+.site-footer {
+  max-width: 1200px; margin: -1rem auto 0; padding: 0 1.4rem 1.4rem;
+}
+.site-footer-inner {
+  padding-top: 1rem; border-top: 1px solid var(--border);
+}
 
 /* setup wizard */
 .wizard-wrap {
@@ -327,6 +370,32 @@ input.mono { font-family: "Cascadia Code", Consolas, monospace; }
 .flag { font-size: 1em; margin-right: 0.3rem; }
 td.geo { white-space: nowrap; }
 
+/* ตาราง Blocked ต้องรักษา IP/ประเทศ/ที่มา/เวลาให้อ่านเป็นหน่วยเดียว
+   ถ้าพื้นที่ไม่พอ ให้เลื่อนใน panel-body แทนการตัดเป็นตัวอักษรแนวตั้ง */
+#blocked-table { min-width: 980px; }
+#blocked-table th:nth-child(2), #blocked-table td:nth-child(2) {
+  min-width: 125px; white-space: nowrap; overflow-wrap: normal; word-break: normal;
+}
+#blocked-table th:nth-child(3), #blocked-table td:nth-child(3) {
+  min-width: 140px; white-space: nowrap; overflow-wrap: normal; word-break: normal;
+}
+#blocked-table th:nth-child(4), #blocked-table td:nth-child(4) {
+  min-width: 180px;
+}
+#blocked-table th:nth-child(5), #blocked-table td:nth-child(5) {
+  min-width: 92px; white-space: nowrap; overflow-wrap: normal; word-break: normal;
+}
+#blocked-table th:nth-child(6), #blocked-table td:nth-child(6),
+#blocked-table th:nth-child(7), #blocked-table td:nth-child(7) {
+  min-width: 145px; white-space: nowrap; overflow-wrap: normal; word-break: normal;
+}
+#blocked-table th:nth-child(8), #blocked-table td:nth-child(8) {
+  min-width: 120px; white-space: normal;
+}
+#blocked-table td:nth-child(8) button {
+  display: block; width: 100%; margin-bottom: 0.2rem;
+}
+
 .log-view {
   margin: 0; padding: 0.8rem; background: #101a26; color: #d6e4f2;
   border-radius: 8px; font-family: "Cascadia Code", Consolas, monospace;
@@ -358,8 +427,27 @@ td.geo { white-space: nowrap; }
 .svc-note { margin-top: 0.7rem; padding-top: 0.7rem; border-top: 1px dashed var(--border); color: var(--muted); font-size: 0.78rem; overflow-wrap: anywhere; }
 
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; }
+.audit-row { grid-template-columns: 1fr; }
+.audit-row table { min-width: 760px; }
+.audit-row th, .audit-row td { white-space: nowrap; }
 @media (max-width: 900px) {
   .two-col { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 979px) {
+  .settings-grid { grid-template-columns: minmax(0, 1fr); }
+  .settings-group { min-width: 0; }
+}
+
+@media (max-width: 600px) {
+  main { padding-left: 0.7rem; padding-right: 0.7rem; }
+  header.top { padding-left: 0.7rem; padding-right: 0.7rem; }
+  .panel-head { align-items: flex-start; }
+  .filter-row > input, .filter-row > select, .filter-row > button { flex: 1 1 100%; width: 100%; }
+  .secret-input { width: 100%; }
+  .secret-input input { flex: 1 1 auto; width: auto; }
+  .gen-row { grid-template-columns: minmax(0, 1fr); }
+  .gen-row .gen-del { justify-self: start; }
 }
 
 @media (prefers-reduced-motion: reduce) {

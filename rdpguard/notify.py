@@ -24,13 +24,18 @@ _MAX_RETRY = 2
 
 
 class Notifier:
-    def __init__(self, cfg=None):
+    def __init__(self, cfg=None, start_worker=True):
         self.cfg = cfg
         self._q = queue.Queue()
         self._last_sent = 0.0
+        self._last_result = {}
+        self._last_error = ""
+        self._last_attempt = 0.0
         self._lock = threading.Lock()
-        self._worker = threading.Thread(target=self._run, daemon=True, name="notify")
-        self._worker.start()
+        self._worker = None
+        if start_worker:
+            self._worker = threading.Thread(target=self._run, daemon=True, name="notify")
+            self._worker.start()
 
     def reload(self, cfg):
         self.cfg = cfg
@@ -76,7 +81,36 @@ class Notifier:
             config_mod.get(cfg, "notify", "smtp_host", "").strip()
             and config_mod.get(cfg, "notify", "smtp_to", "").strip()
         )
-        return tg_ok or smtp_ok
+        webhook_ok = bool(
+            config_mod.get_bool(cfg, "notify", "webhook_enable", False)
+            and config_mod.get(cfg, "notify", "webhook_url", "").strip()
+        )
+        return tg_ok or smtp_ok or webhook_ok
+
+    def status(self):
+        from . import config as config_mod
+
+        cfg = self._cfg()
+        with self._lock:
+            result = dict(self._last_result)
+            last_attempt = self._last_attempt
+            last_error = self._last_error
+        return {
+            "enabled": config_mod.get_bool(cfg, "notify", "enable", False),
+            "channel": config_mod.get(cfg, "notify", "channel", "both"),
+            "configured": self.configured(),
+            "telegram_configured": bool(
+                self._get("telegram_bot_token").strip() and self._get("telegram_chat_id").strip()
+            ),
+            "email_configured": bool(self._get("smtp_host").strip() and self._get("smtp_to").strip()),
+            "webhook_configured": bool(
+                config_mod.get_bool(cfg, "notify", "webhook_enable", False)
+                and self._get("webhook_url").strip()
+            ),
+            "last_result": result,
+            "last_attempt": last_attempt,
+            "last_error": last_error,
+        }
 
     # ---- public API ----
 
@@ -88,6 +122,8 @@ class Notifier:
 
     def test(self):
         """ส่งข้อความทดสอบตามช่องทางที่เลือก — คืนรายงาน {telegram, email}"""
+        from . import config as config_mod
+
         results = {}
         channels = self._channels()
         now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -108,6 +144,15 @@ class Notifier:
                 results["email"] = "ไม่ได้ตั้งค่า"
         else:
             results["email"] = "ไม่ได้เลือกช่องนี้"
+        if config_mod.get_bool(self._cfg(), "notify", "webhook_enable", False):
+            if self._get("webhook_url").strip():
+                ok, err = self._send_webhook(body)
+                results["webhook"] = "ok" if ok else f"ล้มเหลว: {err}"
+            else:
+                results["webhook"] = "ไม่ได้ตั้งค่า"
+        else:
+            results["webhook"] = "ปิดอยู่"
+        self._record_result(results)
         return results
 
     # ---- worker ----
@@ -144,6 +189,8 @@ class Notifier:
             self._last_sent = time.time()
 
     def _send_batch(self, batch):
+        from . import config as config_mod
+
         if len(batch) == 1:
             text = _format_block(batch[0])
         else:
@@ -156,11 +203,29 @@ class Notifier:
             ok_tg, err_tg = self._send_telegram(text)
         if "email" in channels and self._get("smtp_host").strip() and self._get("smtp_to").strip():
             ok_mail, err_mail = self._send_email("RDPGuard — บล็อก IP", text)
+        ok_webhook = True
+        err_webhook = ""
+        if config_mod.get_bool(self._cfg(), "notify", "webhook_enable", False) and self._get("webhook_url").strip():
+            ok_webhook, err_webhook = self._send_webhook(text)
         if not ok_tg:
             log.warning("Telegram ส่งไม่สำเร็จ: %s", err_tg)
         if not ok_mail:
             log.warning("Email ส่งไม่สำเร็จ: %s", err_mail)
+        if not ok_webhook:
+            log.warning("Webhook ส่งไม่สำเร็จ: %s", err_webhook)
+        self._record_result({
+            "telegram": "ok" if ok_tg else f"ล้มเหลว: {err_tg}",
+            "email": "ok" if ok_mail else f"ล้มเหลว: {err_mail}",
+            "webhook": "ok" if ok_webhook else f"ล้มเหลว: {err_webhook}",
+        })
         self._mark_sent()
+
+    def _record_result(self, results):
+        errors = [value for value in results.values() if str(value).startswith("ล้มเหลว")]
+        with self._lock:
+            self._last_result = dict(results)
+            self._last_attempt = time.time()
+            self._last_error = " · ".join(errors)
 
     # ---- channels ----
 
@@ -173,6 +238,35 @@ class Notifier:
         ctx = ssl._create_unverified_context()
         ctx.check_hostname = False
         return ctx
+
+    def _webhook_context(self):
+        from . import config as config_mod
+
+        if config_mod.get_bool(self._cfg(), "notify", "webhook_verify_ssl", True):
+            return ssl.create_default_context()
+        return ssl._create_unverified_context()
+
+    def _send_webhook(self, text):
+        url = self._get("webhook_url").strip()
+        payload = json.dumps({"text": text}, ensure_ascii=False).encode("utf-8")
+        last_err = ""
+        for attempt in range(_MAX_RETRY):
+            try:
+                req = urllib.request.Request(
+                    url,
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=10, context=self._webhook_context()) as resp:
+                    if resp.status < 200 or resp.status >= 300:
+                        last_err = f"HTTP {resp.status}"
+                    else:
+                        return True, ""
+            except Exception as exc:
+                last_err = str(exc)
+            time.sleep(2 * (attempt + 1))
+        return False, last_err
 
     def _send_telegram(self, text):
         token = self._get("telegram_bot_token").strip()

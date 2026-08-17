@@ -18,12 +18,15 @@ config เก็บที่:
 | `log_level` | `INFO` | ระดับ log: `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 | `log_max_mb` | `5` | ขนาดไฟล์ log สูงสุดต่อไฟล์ (MB) — เกินแล้วหมุนเป็น `rdpguard.log.1`, `.2`, ... |
 | `log_backups` | `5` | เก็บไฟล์ log หมุนเวียนกี่ไฟล์ (รวมไฟล์ปัจจุบัน = 6 ไฟล์) |
+| `event_retention_days` | `90` | เก็บ Events กี่วันแล้วลบอัตโนมัติ; `0` = ไม่ลบ |
+| `history_retention_days` | `365` | เก็บประวัติการบล็อกกี่วัน; `0` = ไม่ลบ |
+| `audit_retention_days` | `365` | เก็บ Audit Log กี่วัน; `0` = ไม่ลบ |
 | `setup_done` | `false` | ผ่าน Setup Wizard ครั้งแรกแล้วหรือยัง (ระบบจัดการเอง — ไม่ต้องแก้ด้วยมือ) |
 
 > config.ini จะถูกเติม section/คีย์ที่ยังไม่มีด้วยค่าเริ่มต้นให้อัตโนมัติตอนรัน (ทุกค่าเริ่มต้นเห็นในไฟล์ config ได้) — ค่าที่ตั้งไว้แล้วจะไม่ถูกทับ
 
 > ไฟล์ log เก่า/ใหญ่: ลบ `rdpguard.log.*` ข้าง exe (หรือ `%ProgramData%\RDPGuard`) ทิ้งได้เลยตอนโปรแกรมปิด — ระบบสร้างใหม่ให้เอง
-> ค่า `log_level`, `log_max_mb` และ `log_backups` ยังปรับจากหน้า Web UI ไม่ได้ ต้องแก้ใน `config.ini` แล้ว restart โปรแกรม/service; ค่าเริ่มต้น 5 MB × (ไฟล์ปัจจุบัน + สำรอง 5 ไฟล์) จึงใช้พื้นที่ประมาณไม่เกิน 30 MB
+> ค่า `[general]` ปรับได้จากหน้า Web UI แล้ว แต่การเปลี่ยนค่า Log และ retention ต้อง restart โปรแกรม/service; ค่าเริ่มต้น 5 MB × (ไฟล์ปัจจุบัน + สำรอง 5 ไฟล์) จึงใช้พื้นที่ประมาณไม่เกิน 30 MB
 
 ## [monitor]
 
@@ -112,10 +115,19 @@ Engine เพิ่มเติม (engine RDP/Security เปิดถาวร
 | `smtp_user` / `smtp_password` | *(ว่าง)* | บัญชีผู้ส่ง (ว่างได้ถ้า server ไม่อนุญาต auth) |
 | `smtp_to` | *(ว่าง)* | อีเมลผู้รับ |
 | `cooldown_seconds` | `60` | ส่งอย่างน้อยทุกกี่วินาที — ข้อความระหว่างนั้นรวมเป็นชุดเดียว (`0` = ส่งทันทีทุกครั้ง; กันสแปมตอนโจมตีหนัก) |
+| `webhook_enable` | `false` | เปิด Webhook เสริมจาก Telegram/Email |
+| `webhook_url` | *(ว่าง)* | URL ที่รับ `POST` JSON รูปแบบ `{"text":"..."}` — ค่าจริงถูกซ่อนใน Web UI |
+| `webhook_verify_ssl` | `true` | ตรวจสอบ SSL ของ Webhook; ปิดได้เมื่อ proxy/โปรแกรมกันไวรัส intercept HTTPS |
 
 > ข้อความแจ้งเตือน: `บล็อก IP <ip> (<engine>) — <เหตุผล> — หมดอายุ <เวลา>` — ส่งแบบไม่บล็อก (worker thread) + retry 2 ครั้ง; ส่งไม่สำเร็จ log ใน `rdpguard.log`
 >
 > หาก Telegram ขึ้น `CERTIFICATE_VERIFY_FAILED` ให้ปิด `telegram_verify_ssl` (หรือเอาเครื่องหมายติ๊ก **ตรวจสอบ SSL ของ Telegram** ใน Web UI) แล้วบันทึกค่า — ใช้เฉพาะเมื่อมี proxy/โปรแกรมกันไวรัส intercept HTTPS และควรใช้กับเครือข่ายที่เชื่อถือได้
+
+### Backup และ Restore
+
+- ปุ่ม **ดาวน์โหลด Backup** ในหน้า Settings จะได้ ZIP ที่มีฐานข้อมูลและ `config.redacted.ini` ซึ่งล้างค่าลับแล้ว
+- ปุ่ม **กู้คืน Backup** รับเฉพาะ ZIP ที่มีฐานข้อมูล SQLite ผ่าน `integrity_check`; โปรแกรมจะเก็บเป็นไฟล์รอและต้อง restart ก่อนใช้
+- การกู้คืนไม่เขียนทับฐานข้อมูลที่กำลังเปิดอยู่ทันที และไม่กู้คืน Token/Password จากไฟล์ backup
 
 ## ค่าที่แนะนำตามสถานการณ์
 

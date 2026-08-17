@@ -4,7 +4,7 @@
 แล้วบล็อก IP ผู้โจมตีด้วย Windows Firewall (ในตัว ไม่ต้องติดตั้งเพิ่ม).
 """
 
-__version__ = "1.6.3"
+__version__ = "1.7.0"
 APP_NAME = "RDPGuard"
 SERVICE_NAME = "RDPGuard"
 SERVICE_DISPLAY_NAME = "RDPGuard Service"

@@ -4,6 +4,7 @@ thread-safe ผ่าน lock ตัวเดียว (webui + monitor ใช�
 """
 
 import logging
+import os
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
@@ -20,7 +21,8 @@ CREATE TABLE IF NOT EXISTS events(
     ip TEXT DEFAULT '',
     user TEXT DEFAULT '',
     domain TEXT DEFAULT '',
-    logon_type INTEGER DEFAULT 0
+    logon_type INTEGER DEFAULT 0,
+    source TEXT DEFAULT ''
 );CREATE TABLE IF NOT EXISTS blocked(
     ip TEXT PRIMARY KEY,
     reason TEXT DEFAULT '',
@@ -61,9 +63,20 @@ CREATE TABLE IF NOT EXISTS accumulate(
     first_ts TEXT NOT NULL,
     last_ts TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS audit_log(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    actor TEXT DEFAULT '',
+    action TEXT NOT NULL,
+    target TEXT DEFAULT '',
+    result TEXT DEFAULT '',
+    detail TEXT DEFAULT ''
+);
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
+CREATE INDEX IF NOT EXISTS idx_events_ip ON events(ip);
 CREATE INDEX IF NOT EXISTS idx_blocked_history_created ON blocked_history(created);
 CREATE INDEX IF NOT EXISTS idx_accumulate_last_ts ON accumulate(last_ts);
+CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
 """
 
 
@@ -115,7 +128,8 @@ class Database:
             cols = [row[1] for row in self._conn.execute("PRAGMA table_info(events)")]
             if "source" not in cols:
                 self._conn.execute("ALTER TABLE events ADD COLUMN source TEXT DEFAULT ''")
-                self._conn.commit()
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_events_source_kind ON events(source, kind)")
+            self._conn.commit()
 
     def close(self):
         with self._lock:
@@ -149,6 +163,41 @@ class Database:
             "SELECT * FROM events ORDER BY id DESC LIMIT ?", (int(limit),)
         )
 
+    def query_events(self, q="", ip="", source="", kind="", since="", until="", limit=100, offset=0):
+        """ค้นหาเหตุการณ์แบบแบ่งหน้า — ใช้ค่าที่ผ่านการตรวจจาก Web UI แล้ว"""
+        where = []
+        params = []
+        if q:
+            where.append("(ip LIKE ? OR user LIKE ? OR domain LIKE ? OR source LIKE ?)")
+            value = f"%{q}%"
+            params.extend([value, value, value, value])
+        if ip:
+            where.append("ip LIKE ?")
+            params.append(f"%{ip}%")
+        if source:
+            if source == "generic":
+                where.append("source LIKE ?")
+                params.append("generic%")
+            else:
+                where.append("source = ?")
+                params.append(source)
+        if kind:
+            where.append("kind = ?")
+            params.append(kind)
+        if since:
+            where.append("ts >= ?")
+            params.append(since)
+        if until:
+            where.append("ts <= ?")
+            params.append(until)
+        clause = " WHERE " + " AND ".join(where) if where else ""
+        total = self._query(f"SELECT COUNT(*) AS n FROM events{clause}", tuple(params))[0]["n"]
+        params.extend([max(1, min(int(limit), 500)), max(0, int(offset))])
+        rows = self._query(
+            f"SELECT * FROM events{clause} ORDER BY id DESC LIMIT ? OFFSET ?", tuple(params)
+        )
+        return rows, total
+
     def stats(self, since_hours=24):
         since = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).strftime(
             "%Y-%m-%dT%H:%M:%SZ"
@@ -173,6 +222,24 @@ class Database:
             "blocked_manual": manual,
         }
 
+    def daily_trends(self, days=7):
+        days = max(1, min(int(days), 31))
+        since = (datetime.now(timezone.utc) - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+        rows = self._query(
+            "SELECT substr(ts, 1, 10) AS day, "
+            "SUM(CASE WHEN kind='fail' THEN 1 ELSE 0 END) AS failed, "
+            "SUM(CASE WHEN kind='success' THEN 1 ELSE 0 END) AS success "
+            "FROM events WHERE ts >= ? GROUP BY substr(ts, 1, 10) ORDER BY day",
+            (since,),
+        )
+        by_day = {row["day"]: row for row in rows}
+        result = []
+        for index in range(days):
+            day = (datetime.now(timezone.utc) - timedelta(days=days - 1 - index)).strftime("%Y-%m-%d")
+            row = by_day.get(day, {})
+            result.append({"day": day, "failed": row.get("failed", 0), "success": row.get("success", 0)})
+        return result
+
     def block_ip(self, ip, reason="", source="auto", expires=None, rule_name=""):
         now = _now_iso()
         if expires is None:
@@ -195,6 +262,44 @@ class Database:
 
     def list_blocked(self):
         return self._query("SELECT * FROM blocked ORDER BY created DESC")
+
+    def query_blocked(self, q="", source="", limit=100, offset=0):
+        where = []
+        params = []
+        if q:
+            where.append("(ip LIKE ? OR reason LIKE ? OR rule_name LIKE ?)")
+            value = f"%{q}%"
+            params.extend([value, value, value])
+        if source:
+            where.append("source = ?")
+            params.append(source)
+        clause = " WHERE " + " AND ".join(where) if where else ""
+        total = self._query(f"SELECT COUNT(*) AS n FROM blocked{clause}", tuple(params))[0]["n"]
+        params.extend([max(1, min(int(limit), 500)), max(0, int(offset))])
+        rows = self._query(
+            f"SELECT * FROM blocked{clause} ORDER BY created DESC LIMIT ? OFFSET ?", tuple(params)
+        )
+        return rows, total
+
+    def query_blocked_history(self, q="", source="", limit=100, offset=0):
+        where = []
+        params = []
+        if q:
+            where.append("(ip LIKE ? OR reason LIKE ? OR unblocked_by LIKE ?)")
+            value = f"%{q}%"
+            params.extend([value, value, value])
+        if source:
+            where.append("source = ?")
+            params.append(source)
+        clause = " WHERE " + " AND ".join(where) if where else ""
+        total = self._query(
+            f"SELECT COUNT(*) AS n FROM blocked_history{clause}", tuple(params)
+        )[0]["n"]
+        params.extend([max(1, min(int(limit), 500)), max(0, int(offset))])
+        rows = self._query(
+            f"SELECT * FROM blocked_history{clause} ORDER BY id DESC LIMIT ? OFFSET ?", tuple(params)
+        )
+        return rows, total
 
     def expired_blocks(self):
         rows = self.list_blocked()
@@ -353,3 +458,67 @@ class Database:
                 "(SELECT rowid FROM geoip_cache ORDER BY ts ASC LIMIT ?)",
                 (excess,),
             )
+
+    def cleanup_retention(self, event_days=90, history_days=365, audit_days=365):
+        """ลบข้อมูลเก่าตาม retention — ค่า 0 หมายถึงไม่ลบ"""
+        removed = {"events": 0, "blocked_history": 0, "audit_log": 0}
+        now = datetime.now(timezone.utc)
+        rules = (
+            ("events", "ts", event_days),
+            ("blocked_history", "created", history_days),
+            ("audit_log", "ts", audit_days),
+        )
+        for table, column, days in rules:
+            if int(days or 0) <= 0:
+                continue
+            since = (now - timedelta(days=int(days))).strftime("%Y-%m-%dT%H:%M:%SZ")
+            cur = self._execute(f"DELETE FROM {table} WHERE {column} < ?", (since,))
+            removed[table] = max(0, cur.rowcount)
+        return removed
+
+    def add_audit(self, actor, action, target="", result="ok", detail=""):
+        self._execute(
+            "INSERT INTO audit_log(ts, actor, action, target, result, detail) VALUES(?,?,?,?,?,?)",
+            (_now_iso(), actor or "", action or "", target or "", result or "", detail or ""),
+        )
+
+    def query_audit(self, q="", action="", limit=100, offset=0):
+        where = []
+        params = []
+        if q:
+            where.append("(actor LIKE ? OR action LIKE ? OR target LIKE ? OR detail LIKE ?)")
+            value = f"%{q}%"
+            params.extend([value, value, value, value])
+        if action:
+            where.append("action = ?")
+            params.append(action)
+        clause = " WHERE " + " AND ".join(where) if where else ""
+        total = self._query(f"SELECT COUNT(*) AS n FROM audit_log{clause}", tuple(params))[0]["n"]
+        params.extend([max(1, min(int(limit), 500)), max(0, int(offset))])
+        rows = self._query(
+            f"SELECT * FROM audit_log{clause} ORDER BY id DESC LIMIT ? OFFSET ?", tuple(params)
+        )
+        return rows, total
+
+    def table_counts(self):
+        result = {}
+        for table in ("events", "blocked", "blocked_history", "whitelist", "blacklist", "audit_log"):
+            result[table] = self._query(f"SELECT COUNT(*) AS n FROM {table}")[0]["n"]
+        return result
+
+    def file_size(self):
+        try:
+            with self._lock:
+                path = self._conn.execute("PRAGMA database_list").fetchone()[2]
+            return os.path.getsize(path) if path else 0
+        except Exception:
+            return 0
+
+    def backup_to(self, destination):
+        """สร้างสำเนา SQLite แบบปลอดภัยขณะมีการเขียนอยู่"""
+        target = sqlite3.connect(destination)
+        try:
+            with self._lock:
+                self._conn.backup(target)
+        finally:
+            target.close()

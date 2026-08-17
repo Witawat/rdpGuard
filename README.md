@@ -6,11 +6,12 @@ RDP brute-force protection สำหรับ Windows Server / Windows Desktop �
 
 | รายการ | ค่า |
 |---|---|
-| เวอร์ชัน | 1.6.3 |
+| เวอร์ชัน | 1.7.0 |
 | ภาษา | Python 3.8+ |
 | Windows | source: 7 SP1 / 8.1 / 10 / 11 + Server 2008 R2 SP1 ขึ้นไป · exe (build ด้วย Python 3.11): 8.1 / 10 / 11 + Server 2012 ขึ้นไป (ดู INSTALL.md) |
 | Dependency | pywin32 อย่างเดียว (web UI ใช้ stdlib ล้วน) |
 | Web UI | http://127.0.0.1:8123 (ภาษาไทย, เปลี่ยนพอร์ตได้) |
+| License | MIT License |
 
 ## คุณสมบัติ
 
@@ -37,6 +38,9 @@ RDP brute-force protection สำหรับ Windows Server / Windows Desktop �
 - **แจ้งเตือนเมื่อบล็อก IP** — Telegram และ/หรือ Email (SMTP) เลือกช่องทางได้ มี cooldown รวมข้อความและ retry แบบ background ไม่หน่วงการบล็อก
 - **จัดการ Log** — หมุนไฟล์อัตโนมัติ (ค่าเริ่มต้น 5 MB/ไฟล์ + เก็บสำรอง 5 ไฟล์), เลือกดู 250/500/1000 บรรทัด และแสดงขนาดไฟล์ใน Web UI
 - **ทำงานทนขึ้น** — กันรันซ้ำ, ป้องกัน CSRF, จำกัดการเดารหัสแยกต่อ IP, session sliding, SQLite WAL และจำกัดขนาด GeoIP cache
+- **ค้นหา/ส่งออก/ประวัติ** — กรอง Events และ Blocked, แบ่งหน้า, ส่งออก CSV, ดูประวัติปลดบล็อกและ Audit Log
+- **สำรองข้อมูล** — ดาวน์โหลด backup แบบล้างค่าลับและกู้คืนฐานข้อมูลหลัง restart
+- **Webhook เสริม** — ส่ง JSON แจ้งเตือนเพิ่มจาก Telegram/Email
 
 ## เริ่มต้นเร็ว (Quick Start)
 
@@ -91,6 +95,7 @@ rdpGuard/
 | [USAGE.md](USAGE.md) | วิธีใช้ Web UI + CLI ทั้งหมด |
 | [CONFIG.md](CONFIG.md) | อธิบาย config ทุกค่าพร้อมค่าเริ่มต้น |
 | [GENERIC.md](GENERIC.md) | ตั้งค่า Generic log engine และเขียน regex |
+| [FEATURES.md](FEATURES.md) | รายการฟีเจอร์ปัจจุบันและเฟสถัดไป |
 | [API.md](API.md) | REST API สำหรับนักพัฒนา |
 | [DESIGN.md](DESIGN.md) | design ของ Web UI |
 | [CHANGELOG.md](CHANGELOG.md) | ประวัติเวอร์ชัน |

@@ -53,7 +53,7 @@ body: `{ "password": "..." }` → คืน `{ "token": "..." }` และ set c
 {
   "ok": true,
   "data": {
-    "version": "1.6.3",
+    "version": "1.7.0",
     "context": "service",
     "monitor_running": true,
     "stats": {
@@ -105,8 +105,9 @@ body: `{ "ip": "192.168.1.0/24", "note": "สำนักงาน" }` (รอ�
 ### GET /api/settings
 คืน config ปัจจุบันทั้งไฟล์ (ยกเว้นรหัสผ่านจริง — ใช้ `webui.password_hidden` แทน)
 ```json
-{ "ok": true, "data": { "general": { "log_level": "INFO", "log_max_mb": "5", "log_backups": "5" }, "monitor": { ... }, "webui": { "password_hidden": "***" }, ... } }
+{ "ok": true, "data": { "general": { "log_level": "INFO", "log_max_mb": "5", "event_retention_days": "90" }, "monitor": { ... }, "webui": { "password_set": true }, "notify": { "telegram_bot_token_set": true }, ... } }
 ```
+ค่าลับจะไม่อยู่ใน response; ใช้คีย์ลงท้าย `_set` เพื่อตรวจว่าตั้งค่าแล้วหรือยัง
 
 ### GET /api/sessions
 คืน session RDP/console/network ที่กำลังใช้งาน — พยายามใช้ `qwinsta`/`query session` และ fallback เป็น WTS API (`win32ts`)
@@ -143,6 +144,12 @@ log ล่าสุด (รับค่า 1–2000; ค่าติดลบจ
 { "ok": true, "data": { "lines": ["..."], "file": "C:\\...\\rdpguard.log", "file_size": 47942 } }
 ```
 
+### GET /api/log/files
+รายการไฟล์ `rdpguard.log` และไฟล์หมุนเวียนที่อนุญาตให้ดู
+
+### GET /api/log/download?file=rdpguard.log.1
+ดาวน์โหลดไฟล์ Log ที่อนุญาต — ไม่รับ path นอก data directory
+
 ### POST /api/geoip
 หาประเทศของ IP — body: `{ "ips": ["8.8.8.8", ...] }` (ประมวลผลสูงสุด 20 IP ต่อครั้ง)
 ```json
@@ -173,15 +180,45 @@ log ล่าสุด (รับค่า 1–2000; ค่าติดลบจ
 - ต้องเปิด engine `mssql` อยู่ และ `monitor.enable = true`
 
 ### POST /api/notify/test
-ส่งข้อความทดสอบตามช่องทางที่เลือกใน `[notify]` — ต้องมี monitor/notifier กำลังรันอยู่; โหมด `python run.py web` อย่างเดียวจะตอบว่า monitor ไม่ได้รัน
+ส่งข้อความทดสอบตามช่องทางที่เลือกใน `[notify]` — ทดสอบได้ทั้งโหมด monitor และ `python run.py web` โดยไม่ต้องเปิดการเฝ้าระวัง
 ```json
 { "ok": true, "data": { "message": "ผลทดสอบแจ้งเตือน", "results": { "telegram": "ok", "email": "ไม่ได้เลือกช่องนี้" } } }
 ```
 
+### GET /api/notify/status
+คืนสถานะการตั้งค่าและผลการส่งล่าสุด โดยไม่คืนข้อมูลลับ
+
+### GET /api/trends?days=7
+คืนจำนวน Events `fail`/`success` รายวัน (สูงสุด 31 วัน)
+
+### GET /api/blocked-history?limit=100
+ประวัติ IP ที่ถูกปลดบล็อก พร้อม `unblocked_at` และ `unblocked_by`
+
+### GET /api/blocked-history/export
+ส่งออกประวัติการบล็อกเป็น CSV
+
+### GET /api/audit?limit=100
+Audit Log จากการจัดการผ่าน Web UI
+
+### GET /api/audit/export
+ส่งออก Audit Log เป็น CSV
+
+### POST /api/blocked/bulk-unblock
+ปลดบล็อกหลายรายการ — body `{ "ips": ["203.0.113.9", "198.51.100.4"] }` สูงสุด 200 รายการ
+
+### GET /api/events/export / GET /api/blocked/export
+ส่งออก Events หรือรายการ Blocked เป็น CSV ตามตัวกรองเดียวกับ endpoint หลัก จำกัดสูงสุด 100,000 รายการ
+
+### GET /api/backup
+ดาวน์โหลด ZIP backup ที่ล้างค่าลับออกจาก config แล้ว
+
+### POST /api/backup/restore
+อัปโหลด ZIP backup ด้วย `Content-Type: application/zip`; ตรวจ SQLite integrity แล้วเก็บเป็นไฟล์รอ restart ไม่เขียนทับฐานข้อมูลที่กำลังใช้งาน
+
 > `/api/overview` มีฟิลด์ `health` ด้วย: `{ is_admin, in_service, can_add_rules, eventlog_ok, firewall_com_ok, engines: {...}, monitor_running }` — ใช้ตรวจสถานะส่วนประกอบสำคัญ
 
 ### POST /api/settings
-บันทึก config — รับเฉพาะ key ที่อนุญาตต่อ section (ดู [CONFIG.md](CONFIG.md)) แล้วมีผลทันที ไม่ต้อง restart ยกเว้น `webui.host`/`webui.port` และค่า logging ใน `[general]` ที่ต้อง restart
+บันทึก config — รับเฉพาะ key ที่อนุญาตต่อ section (ดู [CONFIG.md](CONFIG.md)) แล้วมีผลทันที ไม่ต้อง restart ยกเว้น `webui.host`/`webui.port`, ค่า logging และ retention ใน `[general]` ที่ต้อง restart
 ```json
 { "detection": { "max_attempts": "8", "window_minutes": "15" } }
 ```

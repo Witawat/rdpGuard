@@ -84,6 +84,7 @@ async function init() {
 }
 
 function showLogin() {
+  stopAppPolling();
   $("login-view").style.display = "flex";
   $("app-view").style.display = "none";
   $("login-password").focus();
@@ -91,23 +92,33 @@ function showLogin() {
 
 let appIntervals = [];
 
+function stopAppPolling() {
+  appIntervals.forEach(clearInterval);
+  appIntervals = [];
+}
+
 function showApp() {
   $("login-view").style.display = "none";
   $("app-view").style.display = "block";
-  appIntervals.forEach(clearInterval);
-  appIntervals = [];
+  stopAppPolling();
   refreshOverview();
+  refreshTrends();
   refreshDetection();
   refreshService();
   refreshEvents();
   refreshBlocked();
   refreshLists();
+  refreshHistory();
+  refreshAudit();
   refreshSettings();
   refreshLog();
   refreshSessions();
   appIntervals.push(setInterval(refreshOverview, 3000));
+  appIntervals.push(setInterval(refreshTrends, 30000));
   appIntervals.push(setInterval(refreshEvents, 3000));
   appIntervals.push(setInterval(refreshBlocked, 5000));
+  appIntervals.push(setInterval(refreshHistory, 10000));
+  appIntervals.push(setInterval(refreshAudit, 10000));
   appIntervals.push(setInterval(refreshService, 10000));
   appIntervals.push(setInterval(refreshLog, 5000));
   appIntervals.push(setInterval(refreshSessions, 10000));
@@ -423,11 +434,29 @@ async function refreshOverview() {
       : data.context === "standalone-admin" ? "รัน standalone (admin)"
       : "รัน standalone (ไม่มี admin)";
     $("pill-version").textContent = "v" + data.version;
+    const dbSize = data.database?.size || 0;
+    $("database-hint").textContent = dbSize
+      ? `ฐานข้อมูล ${(dbSize / 1048576).toFixed(1)} MB`
+      : "";
 
     renderHealth(data.health);
   } catch (e) {
     if (e.message.includes("401") || e.message.includes("ล็อกอิน")) showLogin();
   }
+}
+
+async function refreshTrends() {
+  try {
+    const { data } = await api("/api/trends?days=7");
+    const bars = $("trend-bars");
+    const rows = data.days || [];
+    const maximum = Math.max(1, ...rows.map((row) => Math.max(row.failed || 0, row.success || 0)));
+    bars.innerHTML = rows.map((row) => {
+      const failHeight = Math.max(2, Math.round(((row.failed || 0) / maximum) * 100));
+      const okHeight = Math.max(2, Math.round(((row.success || 0) / maximum) * 100));
+      return `<div class="trend-day"><div class="trend-columns"><span class="trend-bar fail" style="height:${failHeight}%" title="ล้มเหลว ${row.failed || 0}"></span><span class="trend-bar success" style="height:${okHeight}%" title="สำเร็จ ${row.success || 0}"></span></div><span>${esc(row.day.slice(5))}</span></div>`;
+    }).join("") || '<span class="hint">ยังไม่มีข้อมูล</span>';
+  } catch (e) {}
 }
 
 /* ---------- system health ---------- */
@@ -535,15 +564,36 @@ $("selftest-btn").addEventListener("click", async () => {
 /* ---------- events ---------- */
 
 let _eventsSeq = 0;
+let _eventsPage = 0;
+const _eventsPageSize = 80;
+
+function eventFilterQuery() {
+  const params = new URLSearchParams({
+    limit: String(_eventsPageSize),
+    offset: String(_eventsPage * _eventsPageSize),
+  });
+  const q = $("events-q")?.value.trim();
+  const source = $("events-source")?.value;
+  const kind = $("events-kind")?.value;
+  if (q) params.set("q", q);
+  if (source) params.set("source", source);
+  if (kind) params.set("kind", kind);
+  return params;
+}
 
 async function refreshEvents() {
   const seq = ++_eventsSeq;
   try {
-    const { data } = await api("/api/events?limit=80");
+    const { data } = await api("/api/events?" + eventFilterQuery().toString());
     if (seq !== _eventsSeq) return;  // มี request ใหม่กว่าแล้ว — อย่าเขียนทับข้อมูลใหม่ด้วยของเก่า
     const tbody = $("events-table").querySelector("tbody");
     tbody.innerHTML = "";
-    $("events-count").textContent = `${data.events.length} เหตุการณ์ล่าสุด`;
+    const total = data.total ?? data.events.length;
+    const pages = Math.max(1, Math.ceil(total / _eventsPageSize));
+    $("events-count").textContent = `${total} เหตุการณ์`;
+    $("events-page").textContent = `หน้า ${_eventsPage + 1} / ${pages}`;
+    $("events-prev").disabled = _eventsPage <= 0;
+    $("events-next").disabled = _eventsPage + 1 >= pages;
     $("events-empty").style.display = data.events.length ? "none" : "";
     for (const ev of data.events) {
       const tr = document.createElement("tr");
@@ -560,36 +610,84 @@ async function refreshEvents() {
   } catch (e) {}
 }
 
+function exportEvents() {
+  const params = eventFilterQuery();
+  params.delete("limit");
+  params.delete("offset");
+  window.location.href = "/api/events/export?" + params.toString();
+}
+
+$("events-prev").addEventListener("click", () => { if (_eventsPage > 0) { _eventsPage--; refreshEvents(); } });
+$("events-next").addEventListener("click", () => { _eventsPage++; refreshEvents(); });
+$("events-export").addEventListener("click", exportEvents);
+$("events-clear").addEventListener("click", () => {
+  $("events-q").value = "";
+  $("events-source").value = "";
+  $("events-kind").value = "";
+  _eventsPage = 0;
+  refreshEvents();
+});
+let _eventsFilterTimer = 0;
+function scheduleEventsRefresh() {
+  clearTimeout(_eventsFilterTimer);
+  _eventsFilterTimer = setTimeout(() => { _eventsPage = 0; refreshEvents(); }, 250);
+}
+["events-q", "events-source", "events-kind"].forEach((id) => {
+  $(id).addEventListener("input", scheduleEventsRefresh);
+  $(id).addEventListener("change", scheduleEventsRefresh);
+});
+
 /* ---------- blocked ---------- */
 
 let _blockedSeq = 0;
+let _blockedPage = 0;
+const _blockedPageSize = 100;
+
+function blockedFilterQuery() {
+  const params = new URLSearchParams({
+    limit: String(_blockedPageSize),
+    offset: String(_blockedPage * _blockedPageSize),
+  });
+  const q = $("blocked-q")?.value.trim();
+  const source = $("blocked-source")?.value;
+  if (q) params.set("q", q);
+  if (source) params.set("source", source);
+  return params;
+}
 
 async function refreshBlocked() {
   const seq = ++_blockedSeq;
   try {
-    const { data } = await api("/api/blocked");
+    const { data } = await api("/api/blocked?" + blockedFilterQuery().toString());
     if (seq !== _blockedSeq) return;
     const tbody = $("blocked-table").querySelector("tbody");
     tbody.innerHTML = "";
     $("blocked-empty").style.display = data.blocked.length ? "none" : "";
     const warn = $("blocked-count-warn");
     if (warn) {
-      if (data.blocked.length > 200) {
+      const total = data.total ?? data.blocked.length;
+      if (total > 200) {
         warn.style.display = "";
-        warn.innerHTML = `<span class="h-err">&#9888;</span> มี IP ถูกบล็อก ${data.blocked.length} IP (${data.blocked.length} rules) — จำนวนเยอะมาก แนะนำ: บล็อกแบบ CIDR (subnet), ลด block_hours, หรือปลดล้าง IP ที่ไม่จำเป็น`;
-      } else if (data.blocked.length > 50) {
+        warn.innerHTML = `<span class="h-err">&#9888;</span> มี IP ถูกบล็อก ${total} IP — จำนวนเยอะมาก แนะนำ: บล็อกแบบ CIDR (subnet), ลด block_hours, หรือปลดล้าง IP ที่ไม่จำเป็น`;
+      } else if (total > 50) {
         warn.style.display = "";
-        warn.innerHTML = `<span class="h-mute">&#9888;</span> มี IP ถูกบล็อก ${data.blocked.length} IP (${data.blocked.length} rules) — ถ้า IP โจมตีมาจาก subnet เดียวกัน แนะนำบล็อกแบบ CIDR (เช่น 203.0.113.0/24) แทนราย IP`;
+        warn.innerHTML = `<span class="h-mute">&#9888;</span> มี IP ถูกบล็อก ${total} IP — ถ้า IP โจมตีมาจาก subnet เดียวกัน แนะนำบล็อกแบบ CIDR แทนราย IP`;
       } else {
         warn.style.display = "none";
       }
     }
+    const pages = Math.max(1, Math.ceil((data.total ?? data.blocked.length) / _blockedPageSize));
+    $("blocked-page").textContent = `หน้า ${_blockedPage + 1} / ${pages}`;
+    $("blocked-prev").disabled = _blockedPage <= 0;
+    $("blocked-next").disabled = _blockedPage + 1 >= pages;
+    $("blocked-select-all").checked = false;
     data.blocked.forEach((b, i) => {
       const tr = document.createElement("tr");
       tr.dataset.ip = b.ip;
       const expires = b.expires ? fmtTs(b.expires) : "ถาวร";
       const ruleName = b.rule_name || "RDPGuard Block " + b.ip;
       tr.innerHTML = `
+        <td><input type="checkbox" class="blocked-select" data-ip="${esc(b.ip)}"></td>
         <td class="mono">${esc(b.ip)}</td>
         <td class="geo">-</td>
         <td>${esc(b.reason)}</td>
@@ -602,9 +700,61 @@ async function refreshBlocked() {
         </td>`;
       tbody.appendChild(tr);
     });
-    fillCountry(data.blocked, (r) => r.ip, 2, "blocked-table");
+    updateBulkButton();
+    fillCountry(data.blocked, (r) => r.ip, 3, "blocked-table");
   } catch (e) {}
 }
+
+function exportBlocked() {
+  const params = blockedFilterQuery();
+  params.delete("limit");
+  params.delete("offset");
+  window.location.href = "/api/blocked/export?" + params.toString();
+}
+
+function updateBulkButton() {
+  const selected = document.querySelectorAll(".blocked-select:checked").length;
+  const button = $("blocked-bulk-unblock");
+  if (button) {
+    button.disabled = selected === 0;
+    button.textContent = selected ? `ปลดรายการที่เลือก (${selected})` : "ปลดรายการที่เลือก";
+  }
+}
+
+$("blocked-prev").addEventListener("click", () => { if (_blockedPage > 0) { _blockedPage--; refreshBlocked(); } });
+$("blocked-next").addEventListener("click", () => { _blockedPage++; refreshBlocked(); });
+$("blocked-export").addEventListener("click", exportBlocked);
+$("blocked-clear").addEventListener("click", () => {
+  $("blocked-q").value = "";
+  $("blocked-source").value = "";
+  _blockedPage = 0;
+  refreshBlocked();
+});
+let _blockedFilterTimer = 0;
+function scheduleBlockedRefresh() {
+  clearTimeout(_blockedFilterTimer);
+  _blockedFilterTimer = setTimeout(() => { _blockedPage = 0; refreshBlocked(); }, 250);
+}
+["blocked-q", "blocked-source"].forEach((id) => {
+  $(id).addEventListener("input", scheduleBlockedRefresh);
+  $(id).addEventListener("change", scheduleBlockedRefresh);
+});
+$("blocked-select-all").addEventListener("change", (event) => {
+  document.querySelectorAll(".blocked-select").forEach((input) => { input.checked = event.target.checked; });
+  updateBulkButton();
+});
+document.addEventListener("change", (event) => {
+  if (event.target.classList.contains("blocked-select")) updateBulkButton();
+});
+$("blocked-bulk-unblock").addEventListener("click", async () => {
+  const ips = Array.from(document.querySelectorAll(".blocked-select:checked"), (input) => input.dataset.ip);
+  if (!ips.length || !confirm(`ปลดบล็อก ${ips.length} รายการที่เลือกหรือไม่?`)) return;
+  try {
+    const { data } = await api("/api/blocked/bulk-unblock", { method: "POST", body: JSON.stringify({ ips }) });
+    toast(`ปลดบล็อกสำเร็จ ${data.success}/${data.total} รายการ`, data.success === data.total ? "ok" : "");
+    refreshBlocked();
+  } catch (e) { toast(e.message, "error"); }
+});
 
 $("block-btn").addEventListener("click", async () => {
   const ip = $("block-ip").value.trim();
@@ -699,23 +849,24 @@ async function refreshLists() {
   } catch (e) {}
 }
 
-async function addToList(which, inputId, path) {
+async function addToList(which, inputId, noteId, path) {
   const ip = $(inputId).value.trim();
   if (!ip) return;
   try {
     const { data } = await api(path, {
       method: "POST",
-      body: JSON.stringify({ ip, note: "" }),
+      body: JSON.stringify({ ip, note: $(noteId).value.trim().slice(0, 200) }),
     });
     toast(data.message, "ok");
     $(inputId).value = "";
+    $(noteId).value = "";
     refreshLists();
   } catch (e) {
     toast(e.message, "error");
   }
 }
-$("wl-add").addEventListener("click", () => addToList("wl", "wl-ip", "/api/whitelist"));
-$("bl-add").addEventListener("click", () => addToList("bl", "bl-ip", "/api/blacklist"));
+$("wl-add").addEventListener("click", () => addToList("wl", "wl-ip", "wl-note", "/api/whitelist"));
+$("bl-add").addEventListener("click", () => addToList("bl", "bl-ip", "bl-note", "/api/blacklist"));
 
 document.addEventListener("click", async (e) => {
   const wlDel = e.target.closest(".wl-del");
@@ -735,34 +886,135 @@ document.addEventListener("click", async (e) => {
   }
 });
 
+/* ---------- history / audit ---------- */
+
+async function refreshHistory() {
+  try {
+    const params = new URLSearchParams({ limit: "100" });
+    const q = $("history-q")?.value.trim();
+    const source = $("history-source")?.value;
+    if (q) params.set("q", q);
+    if (source) params.set("source", source);
+    const { data } = await api("/api/blocked-history?" + params.toString());
+    const tbody = $("history-table").querySelector("tbody");
+    tbody.innerHTML = "";
+    $("history-empty").style.display = data.history.length ? "none" : "";
+    data.history.forEach((row) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td class="mono">${esc(row.ip)}</td><td>${sourceBadge(row.source)}</td><td class="mono nw">${fmtTs(row.created)}</td><td class="mono nw">${fmtTs(row.unblocked_at)}</td><td>${esc(row.unblocked_by || "-")}</td>`;
+      tbody.appendChild(tr);
+    });
+  } catch (e) {}
+}
+
+async function refreshAudit() {
+  try {
+    const params = new URLSearchParams({ limit: "100" });
+    const q = $("audit-q")?.value.trim();
+    if (q) params.set("q", q);
+    const { data } = await api("/api/audit?" + params.toString());
+    const tbody = $("audit-table").querySelector("tbody");
+    tbody.innerHTML = "";
+    $("audit-empty").style.display = data.audit.length ? "none" : "";
+    data.audit.forEach((row) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td class="mono nw">${fmtTs(row.ts)}</td><td>${esc(row.actor)}</td><td>${esc(row.action)}</td><td class="mono">${esc(row.target)}</td><td>${esc(row.result)}</td>`;
+      tbody.appendChild(tr);
+    });
+  } catch (e) {}
+}
+
+$("history-export").addEventListener("click", () => {
+  const params = new URLSearchParams();
+  if ($("history-q").value.trim()) params.set("q", $("history-q").value.trim());
+  if ($("history-source").value) params.set("source", $("history-source").value);
+  window.location.href = "/api/blocked-history/export?" + params.toString();
+});
+$("audit-export").addEventListener("click", () => {
+  const params = new URLSearchParams();
+  if ($("audit-q").value.trim()) params.set("q", $("audit-q").value.trim());
+  window.location.href = "/api/audit/export?" + params.toString();
+});
+["history-q", "history-source", "audit-q"].forEach((id) => {
+  $(id).addEventListener("input", () => { id.startsWith("history") ? refreshHistory() : refreshAudit(); });
+  $(id).addEventListener("change", () => { id.startsWith("history") ? refreshHistory() : refreshAudit(); });
+});
+
 /* ---------- log ---------- */
 
 let _logSeq = 0;
+let _logLines = [];
+let _logFilesLoaded = false;
+
+function renderLogLines() {
+  const query = $("log-search")?.value.trim().toLowerCase() || "";
+  const lines = query ? _logLines.filter((line) => line.toLowerCase().includes(query)) : _logLines;
+  const view = $("log-view");
+  const nearBottom = view.scrollHeight - view.scrollTop - view.clientHeight < 80;
+  view.textContent = lines.length ? lines.join("\n") : "(ไม่พบข้อความ)";
+  if (nearBottom) view.scrollTop = view.scrollHeight;
+  const count = $("log-count-hint");
+  if (count) count.textContent = `${lines.length}/${_logLines.length} บรรทัด`;
+}
+
+async function refreshLogFiles() {
+  if (_logFilesLoaded) return;
+  try {
+    const { data } = await api("/api/log/files");
+    const select = $("log-file");
+    select.innerHTML = "";
+    (data.files || []).forEach((file) => {
+      const option = document.createElement("option");
+      option.value = file.name;
+      option.textContent = file.name;
+      select.appendChild(option);
+    });
+    _logFilesLoaded = true;
+  } catch (e) {}
+}
 
 async function refreshLog() {
+  if ($("log-pause")?.checked) return;
   const seq = ++_logSeq;
   try {
+    await refreshLogFiles();
     const lines = $("log-lines") ? $("log-lines").value : 250;
-    const { data } = await api("/api/log?lines=" + lines);
+    const file = $("log-file")?.value || "rdpguard.log";
+    const { data } = await api(`/api/log?lines=${encodeURIComponent(lines)}&file=${encodeURIComponent(file)}`);
     if (seq !== _logSeq) return;
-    const view = $("log-view");
-    const nearBottom = view.scrollHeight - view.scrollTop - view.clientHeight < 80;
-    view.textContent = data.lines.length ? data.lines.join("\n") : "(log ว่างเปล่า)";
-    if (nearBottom) view.scrollTop = view.scrollHeight;
+    _logLines = data.lines || [];
     $("log-file-hint").textContent = data.file || "";
     const sz = data.file_size || 0;
     $("log-size-hint").textContent = sz > 0
       ? (sz < 1048576 ? `(${Math.max(1, Math.round(sz / 1024))} KB)` : `(${(sz / 1048576).toFixed(1)} MB)`)
       : "";
+    renderLogLines();
   } catch (e) {}
 }
 
 $("log-refresh").addEventListener("click", refreshLog);
 $("log-lines").addEventListener("change", refreshLog);
+$("log-file").addEventListener("change", refreshLog);
+$("log-search").addEventListener("input", renderLogLines);
+$("log-download").addEventListener("click", () => {
+  const file = $("log-file").value || "rdpguard.log";
+  window.location.href = "/api/log/download?file=" + encodeURIComponent(file);
+});
 
 /* ---------- settings ---------- */
 
 const SETTINGS_UI = {
+  general: {
+    title: "Log และฐานข้อมูล",
+    fields: [
+      { key: "log_level", label: "ระดับ Log", type: "select", options: ["DEBUG", "INFO", "WARNING", "ERROR"], restart: true },
+      { key: "log_max_mb", label: "ขนาด Log ต่อไฟล์ (MB)", type: "int", restart: true },
+      { key: "log_backups", label: "จำนวนไฟล์ Log สำรอง", type: "int", restart: true },
+      { key: "event_retention_days", label: "เก็บ Events (วัน, 0=ไม่ลบ)", type: "int", restart: true },
+      { key: "history_retention_days", label: "เก็บประวัติ Blocked (วัน, 0=ไม่ลบ)", type: "int", restart: true },
+      { key: "audit_retention_days", label: "เก็บ Audit Log (วัน, 0=ไม่ลบ)", type: "int", restart: true },
+    ],
+  },
   monitor: {
     title: "การเฝ้าระวัง",
     fields: [
@@ -785,7 +1037,7 @@ const SETTINGS_UI = {
     fields: [
       { key: "host", label: "Host (127.0.0.1 = เฉพาะเครื่องนี้)", type: "text" },
       { key: "port", label: "พอร์ต", type: "int" },
-      { key: "password", label: "รหัสผ่าน (เว้นว่าง = สุ่มใหม่)", type: "text" },
+      { key: "password", label: "รหัสผ่าน (เว้นว่าง = คงเดิม)", type: "secret" },
     ],
   },
   detection: {
@@ -830,16 +1082,20 @@ const SETTINGS_UI = {
     fields: [
       { key: "enable", label: "เปิดการแจ้งเตือนเมื่อบล็อก IP", type: "bool" },
       { key: "channel", label: "ช่องทางที่ใช้", type: "select", options: [{ v: "both", l: "ทั้งสองช่องทาง" }, { v: "telegram", l: "Telegram เท่านั้น" }, { v: "email", l: "Email เท่านั้น" }] },
-      { key: "telegram_bot_token", label: "Telegram: Bot Token (จาก @BotFather)", type: "text" },
-      { key: "telegram_chat_id", label: "Telegram: Chat ID", type: "text" },
+      { key: "telegram_bot_token", label: "Telegram: Bot Token (จาก @BotFather)", type: "secret" },
+      { key: "telegram_chat_id", label: "Telegram: Chat ID", type: "secret" },
       { key: "telegram_verify_ssl", label: "ตรวจสอบ SSL ของ Telegram (ปิดถ้า proxy/กันไวรัส intercept HTTPS แล้วขึ้น CERTIFICATE_VERIFY_FAILED)", type: "bool" },
       { key: "smtp_host", label: "SMTP: Host (เช่น smtp.gmail.com)", type: "text" },
       { key: "smtp_port", label: "SMTP: พอร์ต (587 = STARTTLS, 465 = SSL)", type: "int" },
       { key: "smtp_user", label: "SMTP: ผู้ใช้", type: "text" },
-      { key: "smtp_password", label: "SMTP: รหัสผ่าน", type: "text" },
+      { key: "smtp_password", label: "SMTP: รหัสผ่าน", type: "secret" },
       { key: "smtp_to", label: "SMTP: ผู้รับ", type: "text" },
       { key: "cooldown_seconds", label: "เว้นช่วงส่ง (วินาที, 0 = ส่งทันที)", type: "int" },
+      { key: "webhook_enable", label: "เปิด Webhook เสริม", type: "bool" },
+      { key: "webhook_url", label: "Webhook URL", type: "secret" },
+      { key: "webhook_verify_ssl", label: "ตรวจสอบ SSL ของ Webhook", type: "bool" },
       { key: "_notify_test", label: "ทดสอบการแจ้งเตือน", type: "notify_test" },
+      { key: "_notify_status", label: "สถานะการแจ้งเตือน", type: "notify_status" },
     ],
   },
 };
@@ -950,6 +1206,32 @@ async function refreshSettings() {
             return `<option value="${v}" ${String(values[f.key]) === String(v) ? "selected" : ""}>${l}</option>`;
           }).join("");
           field.innerHTML = `<label>${f.label}</label><select data-sec="${section}" data-key="${f.key}">${opts}</select>`;
+        } else if (f.type === "secret") {
+          field.innerHTML = `<label>${f.label}<span class="gen-hint">เว้นว่างเพื่อคงค่าเดิม</span></label>`;
+          const wrap = document.createElement("div");
+          wrap.className = "secret-input";
+          const input = document.createElement("input");
+          input.type = "password";
+          input.autocomplete = "new-password";
+          input.placeholder = String(values[`${f.key}_set`]) === "true" ? "ตั้งค่าแล้ว (เว้นว่างเพื่อคงเดิม)" : "ยังไม่ได้ตั้งค่า";
+          input.dataset.sec = section;
+          input.dataset.key = f.key;
+          input.dataset.secret = "true";
+          input.dataset.cleared = "false";
+          const clear = document.createElement("button");
+          clear.type = "button";
+          clear.className = "small secret-clear";
+          clear.textContent = "ล้าง";
+          clear.addEventListener("click", () => {
+            input.value = "";
+            input.dataset.cleared = input.dataset.cleared === "true" ? "false" : "true";
+            clear.classList.toggle("active", input.dataset.cleared === "true");
+            clear.textContent = input.dataset.cleared === "true" ? "ยกเลิกการล้าง" : "ล้าง";
+            markSettingsDirty();
+          });
+          wrap.appendChild(input);
+          wrap.appendChild(clear);
+          field.appendChild(wrap);
         } else if (f.type === "generic_logs") {
           field.innerHTML = `<label>${f.label}<span class="gen-hint">รายการละ ชื่อ=path|regex — คั่นหลายรายการด้วย ; ดูตัวอย่างใน GENERIC.md</span></label>`;
           const box = document.createElement("div");
@@ -976,7 +1258,7 @@ async function refreshSettings() {
               const { data } = await api("/api/notify/test", { method: "POST", body: "{}", timeout: 60000 });
               const r = data.results || {};
               msg.style.color = "var(--ink-2)";
-              msg.textContent = `Telegram: ${r.telegram || "-"} · Email: ${r.email || "-"}`;
+              msg.textContent = `Telegram: ${r.telegram || "-"} · Email: ${r.email || "-"} · Webhook: ${r.webhook || "-"}`;
             } catch (e) {
               msg.style.color = "var(--danger)";
               msg.textContent = e.message;
@@ -986,6 +1268,15 @@ async function refreshSettings() {
           box.appendChild(btn);
           box.appendChild(msg);
           field.appendChild(box);
+        } else if (f.type === "notify_status") {
+          field.innerHTML = `<label>${f.label}</label><span class="notify-status" data-notify-status>กำลังโหลด...</span>`;
+          api("/api/notify/status").then(({ data: status }) => {
+            const node = field.querySelector("[data-notify-status]");
+            if (!node) return;
+            const last = Object.entries(status.last_result || {}).map(([key, value]) => `${key}: ${value}`).join(" · ");
+            node.textContent = `${status.configured ? "ตั้งค่าแล้ว" : "ยังไม่พร้อม"}${last ? " · ล่าสุด: " + last : ""}`;
+            node.className = "notify-status " + (status.configured ? "ok" : "warn");
+          }).catch(() => {});
         } else {
           field.innerHTML = `<label>${f.label}</label><input type="text" data-sec="${section}" data-key="${f.key}" value="${esc(values[f.key] ?? "")}">`;
         }
@@ -993,27 +1284,80 @@ async function refreshSettings() {
       }
       grid.appendChild(group);
     }
+    window._settingsDirty = false;
+    updateSettingsState();
   } catch (e) {}
 }
 
+function markSettingsDirty() {
+  window._settingsDirty = true;
+  updateSettingsState();
+}
+
+function updateSettingsState() {
+  const msg = $("settings-dirty");
+  if (msg) msg.textContent = window._settingsDirty ? "มีค่าที่ยังไม่ได้บันทึก" : "";
+}
+
+document.addEventListener("input", (event) => {
+  if (event.target.matches("#settings-grid [data-sec][data-key]")) markSettingsDirty();
+});
+document.addEventListener("change", (event) => {
+  if (event.target.matches("#settings-grid [data-sec][data-key]")) markSettingsDirty();
+});
+
 $("settings-save").addEventListener("click", async () => {
   const payload = {};
-  document.querySelectorAll("[data-sec]").forEach((el) => {
-    if (el.tagName !== "INPUT" && el.tagName !== "SELECT") return; // ข้าม container div (settings-group)
+  document.querySelectorAll("[data-sec][data-key]").forEach((el) => {
     const sec = el.dataset.sec;
     const key = el.dataset.key;
+    if (el.dataset.secret === "true" && !el.value.trim() && el.dataset.cleared !== "true") return;
     if (!payload[sec]) payload[sec] = {};
     if (el.type === "checkbox") payload[sec][key] = el.checked ? "true" : "false";
+    else if (el.dataset.secret === "true" && el.dataset.cleared === "true") payload[sec][key] = "__CLEAR__";
     else payload[sec][key] = el.value.trim();
   });
   try {
     const { data } = await api("/api/settings", { method: "POST", body: JSON.stringify(payload) });
-    toast(data.message, "ok");
+    const restart = data.restart_required?.length ? " ต้อง restart: " + data.restart_required.join(", ") : "";
+    toast(data.message + restart, restart ? "" : "ok");
     $("settings-msg").textContent = "บันทึกแล้ว " + new Date().toLocaleTimeString("th-TH");
     refreshSettings();
   } catch (e) {
     toast(e.message, "error");
   }
+});
+
+$("backup-download").addEventListener("click", () => {
+  window.location.href = "/api/backup";
+});
+
+$("backup-restore").addEventListener("click", () => $("backup-restore-file").click());
+$("backup-restore-file").addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  if (!confirm("กู้คืนฐานข้อมูลจากไฟล์นี้หรือไม่? โปรแกรมจะใช้ข้อมูลใหม่หลัง restart")) return;
+  try {
+    const response = await fetch("/api/backup/restore", {
+      method: "POST",
+      headers: { "Content-Type": "application/zip" },
+      credentials: "same-origin",
+      body: await file.arrayBuffer(),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "กู้คืนไม่สำเร็จ");
+    toast(data.data.message, "ok");
+  } catch (e) {
+    toast(e.message, "error");
+  } finally {
+    event.target.value = "";
+  }
+});
+
+window.addEventListener("beforeunload", (event) => {
+  if (!window._settingsDirty) return;
+  event.preventDefault();
+  event.returnValue = "มีการตั้งค่าที่ยังไม่ได้บันทึก";
 });
 
 init();

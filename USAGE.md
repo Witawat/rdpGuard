@@ -96,6 +96,14 @@ python run.py password
 - ระบบอ่านเฉพาะ 64 KB ท้ายสุดของไฟล์ต่อ request จึงไม่โหลด log ทั้งไฟล์เข้าหน่วยความจำ
 - ไฟล์ log หมุนอัตโนมัติเมื่อถึง `[general] log_max_mb` (ค่าเริ่มต้น 5 MB) และเก็บไฟล์เก่าตาม `[general] log_backups` (ค่าเริ่มต้น 5 ไฟล์)
 - ไฟล์ปัจจุบันและไฟล์สำรองใช้ชื่อ `rdpguard.log`, `rdpguard.log.1`, ... — ลบไฟล์สำรองได้เมื่อหยุดโปรแกรมแล้ว
+- เลือกไฟล์หมุนเวียน, ค้นหาข้อความ, หยุด auto-refresh และดาวน์โหลด Log ได้
+
+### แนวโน้ม / ประวัติ / Audit
+
+- **แนวโน้ม 7 วัน** แสดงจำนวนล้มเหลว/สำเร็จรายวันเพื่อดูช่วงที่มีการโจมตีหนัก
+- **ประวัติการบล็อก** แสดง IP ที่ถูกปลดแล้ว พร้อมเหตุผลและผู้ดำเนินการ
+- **Audit Log** บันทึกการ block/unblock, whitelist/blacklist, เปลี่ยน config, ทดสอบแจ้งเตือน และควบคุม service
+- ทั้งประวัติและ Audit Log ส่งออกเป็น CSV ได้
 
 ### Whitelist / Blacklist
 
@@ -109,7 +117,9 @@ python run.py password
 เปลี่ยนค่าการเฝ้าระวัง/ตรวจจับ/firewall/engine/แจ้งเตือน/Web UI ได้จากหน้าเว็บ กด **บันทึกการตั้งค่า** แล้วมีผลทันที โดย service/monitor โหลด config ใหม่เอง
 
 - การเปลี่ยน `webui.host` หรือ `webui.port` ต้อง restart โปรแกรม/service เพราะเป็นค่าที่ใช้ตอนเปิด HTTP server
-- ค่าใน `[general]` โดยเฉพาะ `log_level`, `log_max_mb`, `log_backups` ต้องแก้ใน `config.ini` และ restart เพื่อให้ logging handler ใช้ค่าใหม่
+- ค่าใน `[general]` โดยเฉพาะ `log_level`, `log_max_mb`, `log_backups` แก้จากหน้า Settings หรือ `config.ini` ได้ แต่ต้อง restart เพื่อให้ logging handler ใช้ค่าใหม่
+- ค่า retention (`event_retention_days`, `history_retention_days`, `audit_retention_days`) ต้อง restart และระบบจะล้างข้อมูลเก่าตามรอบ cleanup
+- ปุ่ม **ดาวน์โหลด Backup** จะล้างค่าลับออกจาก config; ปุ่ม **กู้คืน Backup** ต้อง restart ก่อนใช้ฐานข้อมูลใหม่
 
 > ตั้งค่า **Generic engine** (ไฟล์ log ของโปรแกรมอื่น + regex เอง เช่น MailEnable/SmarterMail/PBX) ดูตัวอย่างโปรแกรมจริงและวิธีทดสอบ regex ได้ที่ **[GENERIC.md](GENERIC.md)**
 
@@ -122,6 +132,7 @@ python run.py password
 - **cooldown 60 วิ** (ค่าเริ่มต้น): โจมตีหนัก ๆ ข้อความถูกรวมเป็นชุดเดียว ไม่สแปม (ตั้ง 0 = ส่งทันทีทุกครั้ง)
 - ส่งแบบ background — ไม่หน่วงการบล็อก; ถ้าส่งไม่สำเร็จ (network/ตั้งค่าผิด) ดู `rdpguard.log`
 - ถ้า Telegram ขึ้น `CERTIFICATE_VERIFY_FAILED` จาก proxy/โปรแกรมกันไวรัสที่ intercept HTTPS ให้ปิด **ตรวจสอบ SSL ของ Telegram** แล้วกดบันทึก; ค่านี้มีผลเฉพาะ Telegram
+- Webhook เป็นช่องทางเสริม ตั้งค่า URL และเปิดใช้ได้จากกลุ่มแจ้งเตือน
 
 ## CLI
 

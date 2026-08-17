@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.7.0 (2026-08-17)
+
+### ฟีเจอร์ใหม่
+
+- **ความปลอดภัยของ Settings** — ไม่ส่ง Telegram Token, Chat ID, SMTP password, Webhook URL หรือ Web UI password กลับใน `/api/settings`; ช่องลับเป็น password input, เว้นว่างเพื่อคงค่าเดิม และมีปุ่มล้างค่าแยก
+- **ค้นหาและส่งออกข้อมูล** — Events/Blocked/Blocked history/Audit Log มีตัวกรอง แบ่งหน้า และส่งออก CSV (ป้องกัน CSV formula injection)
+- **Log viewer รุ่นใหม่** — เลือกไฟล์หมุนเวียน, ค้นหา, หยุด auto-refresh, ดาวน์โหลด และยังอ่านเฉพาะท้ายไฟล์ตามเดิม
+- **ประวัติและ Audit Log** — เก็บการจัดการจาก Web UI และดูประวัติการปลดบล็อกได้
+- **Retention ฐานข้อมูล** — ล้าง Events, Blocked history และ Audit Log เก่าตามจำนวนวันที่ตั้งค่าได้
+- **แนวโน้มการโจมตี** — แสดง Events ล้มเหลว/สำเร็จรายวันย้อนหลัง 7 วัน
+- **Webhook** — ส่งข้อความแจ้งเตือน JSON เพิ่มเติมจาก Telegram/Email
+- **Backup/Restore** — ดาวน์โหลด backup แบบล้างค่าลับ และอัปโหลดฐานข้อมูลที่ตรวจ integrity แล้วเพื่อใช้หลัง restart
+- **ตั้งค่า Log ใน Web UI** — ระดับ Log, ขนาดไฟล์, จำนวนไฟล์สำรอง และ retention พร้อมแจ้งค่าที่ต้อง restart
+
+### แก้บั๊กและความถูกต้อง
+
+- แก้ `hours=0` ใน API บล็อกด้วยมือให้เป็นบล็อกถาวรจริง ไม่ถูกแปลงเป็น 24 ชั่วโมง
+- เพิ่ม validation ค่า config ฝั่ง server และไม่บันทึกบางส่วนเมื่อมีค่าผิด
+- แก้ schema ฐานข้อมูลใหม่และ migration ฐานข้อมูลเก่าที่ไม่มีคอลัมน์ `events.source`
+- แก้ manual/bulk unblock ไม่ลบรายการจาก DB หากลบ Firewall rule ไม่สำเร็จ
+- แก้ `allow`/Whitelist ไม่รายงานสำเร็จหลอกเมื่อปลด Firewall rule ไม่ได้
+- เพิ่ม security headers (`CSP`, `X-Frame-Options`, `Referrer-Policy`)
+- ปรับหน้า UI ให้ไม่ล้นแนวนอนบนจอมือถือ
+
 ## 1.6.3 (2026-08-17)
 
 - **แก้ Telegram error `CERTIFICATE_VERIFY_FAILED` (self-signed certificate)** — เกิดจาก proxy/โปรแกรมกันไวรัสที่ intercept HTTPS: เพิ่มตัวเลือก **"ตรวจสอบ SSL ของ Telegram"** (ตั้งค่า → แจ้งเตือน, config `telegram_verify_ssl`) — ปิดได้เมื่อขึ้น error นี้

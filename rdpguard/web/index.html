@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RDPGuard</title>
-<link rel="stylesheet" href="/style.css?v=1.6.3">
+<link rel="stylesheet" href="/style.css?v=1.7.0">
 </head>
 <body>
 
@@ -18,6 +18,13 @@
     </div>
     <button class="primary" id="login-btn">เข้าสู่ระบบ</button>
     <div class="error" id="login-error"></div>
+    <div class="credit-line" aria-label="ข้อมูลลิขสิทธิ์และผู้พัฒนา">
+      <span>RDPGuard โดย Witawat</span>
+      <span aria-hidden="true">·</span>
+      <a href="https://github.com/Witawat/rdpGuard" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://github.com/Witawat/rdpGuard/blob/master/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a>
+    </div>
   </div>
 </div>
 
@@ -97,6 +104,11 @@
       <div class="card"><div class="label">กฎที่ตั้ง</div><div class="sub mono" id="stat-rule-desc">max 5 ครั้ง / 10 นาที / 24 ชม.</div></div>
     </div>
 
+    <section class="panel trend-panel">
+      <div class="panel-head"><h2>แนวโน้ม 7 วัน</h2><div class="spacer"></div><span class="hint">เหตุการณ์ล้มเหลวและสำเร็จรายวัน</span></div>
+      <div class="panel-body"><div class="trend-bars" id="trend-bars"><span class="hint">กำลังโหลด...</span></div></div>
+    </section>
+
     <section class="panel">
       <div class="panel-head">
         <h2>การตรวจจับ</h2>
@@ -125,6 +137,7 @@
       <div class="panel-head">
         <h2>สถานะระบบ (ส่วนประกอบสำคัญ)</h2>
         <div class="spacer"></div>
+        <span class="hint" id="database-hint"></span>
         <span class="hint">บอกว่าของที่ต้องใช้ทำงานได้จริงหรือไม่</span>
       </div>
       <div class="panel-body">
@@ -175,11 +188,19 @@
         <span class="hint" id="events-count"></span>
       </div>
       <div class="panel-body" style="max-height:420px; overflow:auto">
+        <div class="filter-row">
+          <input type="search" id="events-q" placeholder="ค้นหา IP / ผู้ใช้ / โดเมน / Engine">
+          <select id="events-source"><option value="">ทุก Engine</option><option value="rdp">RDP</option><option value="openssh">OpenSSH</option><option value="mssql">MSSQL</option><option value="iis">IIS</option><option value="mysql">MySQL</option><option value="generic">Generic</option></select>
+          <select id="events-kind"><option value="">ทุกประเภท</option><option value="fail">ล้มเหลว</option><option value="success">สำเร็จ</option><option value="ntlm">NTLM</option></select>
+          <button class="small" id="events-clear">ล้างตัวกรอง</button>
+          <button class="small" id="events-export">ส่งออก CSV</button>
+        </div>
         <table id="events-table">
           <thead><tr><th>เวลา (UTC)</th><th>IP</th><th>ผู้ใช้</th><th>โดเมน</th><th>LogonType</th><th>แหล่ง</th><th>ประเภท</th></tr></thead>
           <tbody></tbody>
         </table>
         <div class="empty" id="events-empty" style="display:none">ยังไม่มีเหตุการณ์</div>
+        <div class="pager"><button class="small" id="events-prev">ก่อนหน้า</button><span class="hint" id="events-page"></span><button class="small" id="events-next">ถัดไป</button></div>
       </div>
     </section>
 
@@ -195,8 +216,15 @@
           <input type="number" id="block-hours" value="24" min="0" step="1" style="width:90px" title="ชั่วโมง (0 = ถาวร)">
           <button class="primary" id="block-btn">บล็อกด้วยมือ</button>
         </div>
+        <div class="filter-row">
+          <input type="search" id="blocked-q" placeholder="ค้นหา IP / เหตุผล / Rule">
+          <select id="blocked-source"><option value="">ทุกที่มา</option><option value="auto">อัตโนมัติ</option><option value="manual">ด้วยมือ</option><option value="blacklist">Blacklist</option><option value="accumulate">สะสม</option></select>
+          <button class="small" id="blocked-clear">ล้างตัวกรอง</button>
+          <button class="small" id="blocked-export">ส่งออก CSV</button>
+        </div>
+        <div class="bulk-row"><label><input type="checkbox" id="blocked-select-all"> เลือกทั้งหมดในหน้านี้</label><button class="small danger" id="blocked-bulk-unblock" disabled>ปลดรายการที่เลือก</button></div>
         <table id="blocked-table">
-          <thead><tr><th>IP</th><th>ประเทศ</th><th>เหตุผล</th><th>ที่มา</th><th>บล็อกเมื่อ (UTC)</th><th>หมดอายุ (UTC)</th><th></th></tr></thead>
+          <thead><tr><th></th><th>IP</th><th>ประเทศ</th><th>เหตุผล</th><th>ที่มา</th><th>บล็อกเมื่อ (UTC)</th><th>หมดอายุ (UTC)</th><th></th></tr></thead>
           <tbody></tbody>
         </table>
         <div class="hint" style="margin-top:0.5rem">ปุ่ม "ตรวจ cmd" = คัดลอกคำสั่ง Windows ตรวจสอบ rule + event log ของ IP นั้นไปวางใน Command Prompt (admin)</div>
@@ -205,6 +233,7 @@
           <button class="danger" id="unblock-all-btn" title="ฉุกเฉิน: ปลดบล็อกทุก IP ที่ RDPGuard บล็อกไว้">ปลดบล็อกทั้งหมด (ฉุกเฉิน)</button>
           <span class="hint">ใช้เมื่อถูกล็อกตัวเอง — ปลดทุก IP ที่ถูกบล็อกทันที</span>
         </div>
+        <div class="pager"><button class="small" id="blocked-prev">ก่อนหน้า</button><span class="hint" id="blocked-page"></span><button class="small" id="blocked-next">ถัดไป</button></div>
         <div class="empty" id="blocked-empty" style="display:none">ยังไม่มี IP ถูกบล็อก</div>
       </div>
     </section>
@@ -215,6 +244,7 @@
         <div class="panel-body">
           <div class="add-row">
             <input type="text" id="wl-ip" class="mono" placeholder="IP หรือ CIDR">
+            <input type="text" id="wl-note" class="note" placeholder="หมายเหตุ (ไม่บังคับ)">
             <button class="primary" id="wl-add">เพิ่ม</button>
           </div>
           <table id="wl-table">
@@ -230,6 +260,7 @@
         <div class="panel-body">
           <div class="add-row">
             <input type="text" id="bl-ip" class="mono" placeholder="IP หรือ CIDR">
+            <input type="text" id="bl-note" class="note" placeholder="หมายเหตุ (ไม่บังคับ)">
             <button class="primary" id="bl-add">เพิ่ม</button>
           </div>
           <table id="bl-table">
@@ -241,11 +272,34 @@
       </section>
     </div>
 
+    <div class="two-col audit-row">
+      <section class="panel">
+        <div class="panel-head"><h2>ประวัติการบล็อก</h2><div class="spacer"></div><button class="small" id="history-export">ส่งออก CSV</button></div>
+        <div class="panel-body">
+          <div class="filter-row"><input type="search" id="history-q" placeholder="ค้นหา IP / เหตุผล / ผู้ปลด"><select id="history-source"><option value="">ทุกที่มา</option><option value="auto">อัตโนมัติ</option><option value="manual">ด้วยมือ</option><option value="blacklist">Blacklist</option><option value="accumulate">สะสม</option></select></div>
+          <table id="history-table"><thead><tr><th>IP</th><th>ที่มา</th><th>บล็อกเมื่อ</th><th>ปลดเมื่อ</th><th>โดย</th></tr></thead><tbody></tbody></table>
+          <div class="empty" id="history-empty" style="display:none">ยังไม่มีประวัติ</div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><h2>Audit Log</h2><div class="spacer"></div><button class="small" id="audit-export">ส่งออก CSV</button></div>
+        <div class="panel-body">
+          <div class="filter-row"><input type="search" id="audit-q" placeholder="ค้นหาผู้ใช้ / การกระทำ / เป้าหมาย"></div>
+          <table id="audit-table"><thead><tr><th>เวลา</th><th>ผู้กระทำ</th><th>การกระทำ</th><th>เป้าหมาย</th><th>ผล</th></tr></thead><tbody></tbody></table>
+          <div class="empty" id="audit-empty" style="display:none">ยังไม่มี Audit Log</div>
+        </div>
+      </section>
+    </div>
+
     <section class="panel">
       <div class="panel-head">
         <h2>ตั้งค่า</h2>
         <div class="spacer"></div>
-        <span class="hint">บันทึกแล้วมีผลทันที (host/พอร์ต Web UI ต้อง restart service)</span>
+        <span class="hint" id="settings-dirty"></span>
+        <button class="small" id="backup-download">ดาวน์โหลด Backup</button>
+        <input type="file" id="backup-restore-file" accept=".zip,application/zip" hidden>
+        <button class="small" id="backup-restore">กู้คืน Backup</button>
+        <span class="hint">บางค่าแสดงคำเตือนให้ restart</span>
       </div>
       <div class="panel-body">
         <div class="settings-grid" id="settings-grid"></div>
@@ -259,7 +313,7 @@
       <div class="panel-head">
         <h2>Session / Remote ที่ใช้งานอยู่</h2>
         <div class="spacer"></div>
-        <span class="hint">qwinsta — ดูว่าใครล็อกอิน RDP/console อยู่ตอนนี้ (refresh อัตโนมัติ 10 วิ)</span>
+        <span class="hint">qwinsta/query session หรือ WTS API — ดูว่าใครล็อกอิน RDP/console อยู่ตอนนี้ (refresh อัตโนมัติ 10 วิ)</span>
       </div>
       <div class="panel-body">
         <table id="sessions-table">
@@ -276,11 +330,16 @@
         <div class="spacer"></div>
         <span class="hint" id="log-file-hint"></span>
         <span class="hint" id="log-size-hint"></span>
+        <span class="hint" id="log-count-hint"></span>
+        <select class="small" id="log-file" title="เลือกไฟล์ Log"><option value="rdpguard.log">rdpguard.log</option></select>
         <select class="small" id="log-lines" title="จำนวนบรรทัดที่แสดง">
           <option value="250" selected>250 บรรทัด</option>
           <option value="500">500 บรรทัด</option>
           <option value="1000">1000 บรรทัด</option>
         </select>
+        <input class="small log-search" type="search" id="log-search" placeholder="ค้นหาใน Log">
+        <label class="small-check"><input type="checkbox" id="log-pause"> หยุดอัปเดต</label>
+        <button class="small" id="log-download">ดาวน์โหลด</button>
         <button class="small" id="log-refresh">โหลดใหม่</button>
       </div>
       <div class="panel-body">
@@ -288,9 +347,18 @@
       </div>
     </section>
   </main>
+  <footer class="site-footer" aria-label="เครดิตและลิขสิทธิ์">
+    <div class="site-footer-inner">
+      <span>RDPGuard โดย Witawat</span>
+      <span aria-hidden="true">·</span>
+      <a href="https://github.com/Witawat/rdpGuard" target="_blank" rel="noopener noreferrer">ดูซอร์สโค้ดบน GitHub</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://github.com/Witawat/rdpGuard/blob/master/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a>
+    </div>
+  </footer>
 </div>
 
 <div class="toast-wrap" id="toasts"></div>
-<script src="/app.js?v=1.6.3"></script>
+<script src="/app.js?v=1.7.0"></script>
 </body>
 </html>

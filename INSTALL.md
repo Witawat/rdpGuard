@@ -89,7 +89,7 @@ build.bat build
 ### อัปเดต exe เดิม
 
 1. หยุด RDPGuard หรือ Windows Service เดิมก่อน
-2. สำรอง `config.ini` และ `rdpguard.db` ถ้าต้องการ
+2. ดาวน์โหลด Backup จากหน้า Web UI หรือสำรอง `config.ini` และ `rdpguard.db` ถ้าต้องการ
 3. แทนที่ `rdpguard.exe` ด้วยไฟล์ใหม่ แล้วเริ่มโปรแกรม/service อีกครั้ง
 
 ไฟล์ข้อมูลไม่ถูกลบระหว่างการอัปเดต และ exe จะใช้ข้อมูลที่อยู่ข้าง exe เป็นหลัก

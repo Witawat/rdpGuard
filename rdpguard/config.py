@@ -67,7 +67,19 @@ CONFIG_FILE = os.path.join(DATA_DIR, "config.ini")
 DB_FILE = os.path.join(DATA_DIR, "rdpguard.db")
 LOG_FILE = os.path.join(DATA_DIR, "rdpguard.log")
 
+
+def _apply_pending_restore():
+    pending = DB_FILE + ".restore"
+    if not os.path.isfile(pending):
+        return
+    try:
+        os.replace(pending, DB_FILE)
+        print(f"กู้คืนฐานข้อมูลจากไฟล์สำรองแล้ว: {DB_FILE}")
+    except Exception as exc:
+        print(f"กู้คืนฐานข้อมูลไม่สำเร็จ: {exc}")
+
 _migrate_legacy_data()
+_apply_pending_restore()
 
 DEFAULT_CONFIG = """\
 [general]
@@ -77,6 +89,12 @@ log_level = INFO
 log_max_mb = 5
 ; เก็บไฟล์ log หมุนเวียนกี่ไฟล์ (5 = log ปัจจุบัน + 5 ไฟล์เก่า)
 log_backups = 5
+; เก็บเหตุการณ์กี่วัน (0 = ไม่ลบอัตโนมัติ)
+event_retention_days = 90
+; เก็บประวัติการบล็อกกี่วัน (0 = ไม่ลบอัตโนมัติ)
+history_retention_days = 365
+; เก็บ audit log กี่วัน (0 = ไม่ลบอัตโนมัติ)
+audit_retention_days = 365
 ; ตั้งค่าเสร็จแล้วหรือยัง (ระบบจัดการเอง — ผ่าน Setup Wizard ครั้งแรก)
 setup_done = false
 
@@ -188,6 +206,11 @@ smtp_password =
 smtp_to =
 ; กันสแปมเมื่อโจมตีหนัก: ส่งอย่างน้อยทุกกี่วินาที (ข้อความระหว่างนั้นรวมเป็นชุดเดียว) — 0 = ส่งทันทีทุกครั้ง
 cooldown_seconds = 60
+; Webhook เสริม (ส่ง JSON {"text": "..."} เมื่อเปิดใช้และมี URL)
+webhook_enable = false
+webhook_url =
+; ตรวจสอบ SSL ของ Webhook — ปิดได้เมื่อ proxy/AV intercept HTTPS
+webhook_verify_ssl = true
 """
 
 

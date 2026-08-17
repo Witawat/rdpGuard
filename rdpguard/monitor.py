@@ -110,6 +110,13 @@ class Monitor:
             config_mod.get_int(self.cfg, "detection", "accumulate_window_hours", 0)
         )
         self.db.cleanup_geoip()
+        removed = self.db.cleanup_retention(
+            event_days=config_mod.get_int(self.cfg, "general", "event_retention_days", 90),
+            history_days=config_mod.get_int(self.cfg, "general", "history_retention_days", 365),
+            audit_days=config_mod.get_int(self.cfg, "general", "audit_retention_days", 365),
+        )
+        if any(removed.values()):
+            log.info("ล้างข้อมูลตาม retention: %s", removed)
         expired = self.db.expired_blocks()
         for row in expired:
             ip = row["ip"]
@@ -165,9 +172,10 @@ class Monitor:
         """เพิ่ม whitelist + ปลดบล็อกถ้าถูกบล็อกอยู่ (ฉุกเฉิน)"""
         self.db.add_whitelist(ip, "allow (ฉุกเฉิน)")
         if self.db.is_blocked(ip):
-            self.fw.remove_block(ip)
-            self.db.unblock_ip(ip, by="allow")
-            return True, f"เพิ่ม {ip} ใน whitelist และปลดบล็อกแล้ว"
+            if self.fw.remove_block(ip):
+                self.db.unblock_ip(ip, by="allow")
+                return True, f"เพิ่ม {ip} ใน whitelist และปลดบล็อกแล้ว"
+            return False, f"เพิ่ม {ip} ใน whitelist แล้ว แต่ลบ Firewall rule ไม่สำเร็จ"
         return True, f"เพิ่ม {ip} ใน whitelist แล้ว"
 
     def blacklist_block(self, ip):
@@ -231,8 +239,8 @@ class Monitor:
         if not row:
             return False, "IP นี้ไม่ได้ถูกบล็อก"
         ok = self.fw.remove_block(ip)
-        self.db.unblock_ip(ip, by="manual")
         if ok:
+            self.db.unblock_ip(ip, by="manual")
             log.info("ปลดบล็อก IP %s (manual)", ip)
             return True, "ปลดบล็อกเรียบร้อย"
         return False, "ลบ rule firewall ไม่สำเร็จ (ตรวจสิทธิ์ admin)"
