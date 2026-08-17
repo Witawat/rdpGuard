@@ -92,6 +92,34 @@ def _single_instance_guard():
         return "skip"
 
 
+def _install_console_handler(ui, monitor):
+    """จับการปิดหน้าต่าง console (กด X)/logoff/shutdown — ทำ cleanup ก่อน process ตาย
+
+    Windows ส่ง CTRL_CLOSE_EVENT แล้ว terminate ตรง ๆ (ข้าม finally ใน Python)
+    ทำให้ SQLite WAL ยังค้าง -> .db-wal/.db-shm ไม่ถูกล้าง ต้องจับเอง
+    CTRL_C_EVENT (0)/CTRL_BREAK_EVENT (1) คืน False ให้ Python โยน KeyboardInterrupt
+    แล้ว finally ใน _cmd_run จัดการตามปกติ"""
+    def handler(ctrl_type):
+        # 2=CTRL_CLOSE_EVENT 5=CTRL_LOGOFF_EVENT 6=CTRL_SHUTDOWN_EVENT
+        if ctrl_type in (2, 5, 6):
+            try:
+                ui.stop()
+                monitor.stop()
+                monitor.db.close()
+            except Exception:
+                pass
+            os._exit(0)
+        return False
+
+    try:
+        import win32api
+
+        win32api.SetConsoleCtrlHandler(handler, True)
+    except Exception:
+        pass
+    return handler
+
+
 def _cmd_run(open_browser=False):
     guard = _single_instance_guard()
     if guard is None:
@@ -113,6 +141,7 @@ def _cmd_run(open_browser=False):
     port = config_mod.get_int(cfg, "webui", "port", 8123)
     password = config_mod.get(cfg, "webui", "password", "")
     ui = start_webui(host, port, monitor=monitor)
+    _install_console_handler(ui, monitor)
     url = f"http://{host}:{port}"
     print()
     print(f"Web UI: {url}")

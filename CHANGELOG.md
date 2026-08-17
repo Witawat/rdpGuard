@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.9.2 (2026-08-17)
+
+### แก้บั๊กและความถูกต้อง
+
+- **แก้ `.db-wal`/`.db-shm` ค้างเมื่อปิด exe แบบธรรมดา** — ตอนกด X ปิดหน้าต่าง console Windows จะ terminate process ตรง ๆ (ข้าม `finally` ใน Python) ทำให้ SQLite ไม่ได้ทำ checkpoint -> ไฟล์ WAL ยังค้าง — เพิ่ม `SetConsoleCtrlHandler` จับ `CTRL_CLOSE_EVENT`/`CTRL_LOGOFF_EVENT`/`CTRL_SHUTDOWN_EVENT` ทำ cleanup (ปิด web UI + monitor + DB) ก่อนออก; Ctrl+C ยังทำงานผ่าน `KeyboardInterrupt` ตามเดิม (ไฟล์ค้างพวกนี้เป็นไฟล์ชั่วคราวของ SQLite ลบได้ไม่กระทบข้อมูล)
+
 ## 1.9.1 (2026-08-17)
 
 ### แก้บั๊กและความถูกต้อง
