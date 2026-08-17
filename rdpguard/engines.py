@@ -185,6 +185,7 @@ class FileTailer:
         self.handler = handler
         self.offset = None
         self.ctime = None
+        self._last_line = None  # sentinel กันนับซ้ำเมื่อไฟล์ถูก truncate (copytruncate)
         self._init_offset = 0 if not tail_from_end else None
 
     def _stat(self):
@@ -205,8 +206,10 @@ class FileTailer:
         self.ctime = ctime
         if self.offset is None:
             self.offset = self._init_offset if self._init_offset is not None else size
+        truncated = False
         if size < self.offset:
             self.offset = 0
+            truncated = True
         if size == self.offset:
             return
         try:
@@ -216,9 +219,23 @@ class FileTailer:
                 self.offset = f.tell()
         except OSError:
             return
-        for line in data.splitlines():
+        lines = data.splitlines()
+        # ไฟล์โดน truncate (ขนาดลดลง — copytruncate/truncate) — ข้ามบรรทัดซ้ำกับ
+        # บรรทัดสุดท้ายที่อ่านไปแล้ว (sentinel) กันนับเหตุการณ์เดิมซ้ำ
+        if truncated and self._last_line is not None:
+            skip = 0
+            for line in lines:
+                if line == self._last_line:
+                    skip += 1
+                else:
+                    break
+            if skip:
+                log.info("log '%s' โดน truncate — ข้ามบรรทัดซ้ำ %d บรรทัด", self.path, skip)
+                lines = lines[skip:]
+        for line in lines:
             try:
                 self.handler(line)
+                self._last_line = line
             except Exception:
                 log.exception("parse log line ล้มเหลว (%s)", self.path)
 

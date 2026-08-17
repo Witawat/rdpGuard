@@ -57,12 +57,25 @@ def _make_service_class():
             from . import config as config_mod
 
             config_mod.ensure_config()
+            _svc_cfg = config_mod.load_config()
             config_mod.setup_logging(
-                config_mod.get(config_mod.load_config(), "general", "log_level", "INFO")
+                config_mod.get(_svc_cfg, "general", "log_level", "INFO"), _svc_cfg
             )
             log.info("service เริ่มทำงาน (%s)", SERVICE_NAME)
 
             from .monitor import Monitor
+
+            # กัน service กับ standalone instance ชนกัน (Global mutex — ข้าม session)
+            try:
+                import win32api
+                import win32event
+
+                self._guard = win32event.CreateMutex(None, False, "Global\\RDPGuard")
+                if win32api.GetLastError() == win32event.ERROR_ALREADY_EXISTS:
+                    log.error("มี RDPGuard instance อื่นรันอยู่แล้ว — service หยุดตัวเอง")
+                    return
+            except Exception:
+                self._guard = None
 
             self._monitor = Monitor()
             self._monitor.start()

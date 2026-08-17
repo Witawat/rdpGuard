@@ -17,6 +17,17 @@ config เก็บที่:
 
 > config.ini จะถูกเติม section/คีย์ที่ยังไม่มีด้วยค่าเริ่มต้นให้อัตโนมัติตอนรัน (ทุกค่าเริ่มต้นเห็นในไฟล์ config ได้) — ค่าที่ตั้งไว้แล้วจะไม่ถูกทับ
 
+## [general]
+
+| คีย์ | ค่าเริ่มต้น | ความหมาย |
+|---|---|---|
+| `log_level` | `INFO` | ระดับ log: `DEBUG` / `INFO` / `WARNING` / `ERROR` |
+| `log_max_mb` | `5` | ขนาดไฟล์ log สูงสุดต่อไฟล์ (MB) — เกินแล้วหมุนเป็น `rdpguard.log.1`, `.2`, ... |
+| `log_backups` | `5` | เก็บไฟล์ log หมุนเวียนกี่ไฟล์ (รวมไฟล์ปัจจุบัน = 6 ไฟล์) |
+| `setup_done` | `false` | ตั้งค่าเสร็จแล้วหรือยัง (ระบบจัดการเอง) |
+
+> ไฟล์ log เก่า/ใหญ่: ลบ `rdpguard.log.*` ข้าง exe (หรือ `%ProgramData%\RDPGuard`) ทิ้งได้เลยตอนโปรแกรมปิด — ระบบสร้างใหม่ให้เอง
+
 ## [monitor]
 
 | คีย์ | ค่าเริ่มต้น | ความหมาย |
@@ -87,6 +98,25 @@ Engine เพิ่มเติม (engine RDP/Security เปิดถาวร
 
 > ⚠️ ถ้าตั้ง `host = 0.0.0.0` ต้องมี password ที่แข็งแรง และเปิดพอร์ต firewall เอง:
 > `netsh advfirewall firewall add rule name="RDPGuard WebUI" dir=in action=allow protocol=TCP localport=8123`
+
+## [notify]
+
+แจ้งเตือนเมื่อบล็อก IP — ตั้งค่าได้ใน Web UI หน้า ตั้งค่า → "แจ้งเตือน (Telegram / Email)" (เปิด `enable` + ตั้งช่องทางอย่างน้อย 1 ช่อง แล้วกด "ส่งข้อความทดสอบ" ตรวจก่อนใช้จริง)
+
+| คีย์ | ค่าเริ่มต้น | ความหมาย |
+|---|---|---|
+| `enable` | `false` | เปิดการแจ้งเตือนเมื่อบล็อก IP |
+| `channel` | `both` | ช่องทางที่ใช้: `both` (ทั้งคู่) / `telegram` / `email` |
+| `telegram_bot_token` | *(ว่าง)* | Bot Token จาก @BotFather |
+| `telegram_chat_id` | *(ว่าง)* | Chat ID ที่จะให้ส่งถึง (ตัวเลข หรือ @username) |
+| `telegram_verify_ssl` | `true` | ตรวจสอบใบรับรอง SSL ของ Telegram API — ตั้ง `false` ถ้าเครื่องมี proxy/กันไวรัสที่ intercept HTTPS แล้วขึ้น `CERTIFICATE_VERIFY_FAILED` |
+| `smtp_host` | *(ว่าง)* | SMTP server เช่น `smtp.gmail.com` / `smtp.office365.com` |
+| `smtp_port` | `587` | `587` = STARTTLS (ส่วนใหญ่) / `465` = SMTPS ตรง |
+| `smtp_user` / `smtp_password` | *(ว่าง)* | บัญชีผู้ส่ง (ว่างได้ถ้า server ไม่อนุญาต auth) |
+| `smtp_to` | *(ว่าง)* | อีเมลผู้รับ |
+| `cooldown_seconds` | `60` | ส่งอย่างน้อยทุกกี่วินาที — ข้อความระหว่างนั้นรวมเป็นชุดเดียว (`0` = ส่งทันทีทุกครั้ง; กันสแปมตอนโจมตีหนัก) |
+
+> ข้อความแจ้งเตือน: `บล็อก IP <ip> (<engine>) — <เหตุผล> — หมดอายุ <เวลา>` — ส่งแบบไม่บล็อก (worker thread) + retry 2 ครั้ง; ส่งไม่สำเร็จ log ใน `rdpguard.log`
 
 ## ค่าที่แนะนำตามสถานการณ์
 

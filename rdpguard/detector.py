@@ -371,6 +371,6 @@ class BruteForceDetector:
             log.error("ไม่สามารถเพิ่ม rule firewall สำหรับ IP %s", ip)
         if self.on_block:
             try:
-                self.on_block(ip, source)
+                self.on_block(ip, source, reason, expires)
             except Exception:
                 log.exception("on_block callback ล้มเหลว")

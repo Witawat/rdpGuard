@@ -73,6 +73,10 @@ DEFAULT_CONFIG = """\
 [general]
 ; ระดับ log: DEBUG / INFO / WARNING / ERROR
 log_level = INFO
+; ขนาดไฟล์ log สูงสุดต่อไฟล์ (MB) — เกินแล้วหมุนเวียนเป็น log.1, log.2, ...
+log_max_mb = 5
+; เก็บไฟล์ log หมุนเวียนกี่ไฟล์ (5 = log ปัจจุบัน + 5 ไฟล์เก่า)
+log_backups = 5
 ; ตั้งค่าเสร็จแล้วหรือยัง (ระบบจัดการเอง — ผ่าน Setup Wizard ครั้งแรก)
 setup_done = false
 
@@ -162,6 +166,28 @@ host = 127.0.0.1
 port = 8123
 ; รหัสผ่านหน้า Web UI (ว่าง = สุ่มให้อัตโนมัติตอนรันครั้งแรก)
 password =
+
+[notify]
+; แจ้งเตือนเมื่อบล็อก IP — เปิดใช้ + ตั้งช่องทางอย่างน้อย 1 ช่อง (Telegram และ/หรือ Email)
+enable = false
+; ช่องทาง: both (ทั้งคู่) / telegram / email
+channel = both
+; --- Telegram bot (สร้างกับ @BotFather — ได้ bot token + chat id) ---
+telegram_bot_token =
+telegram_chat_id =
+; ตรวจสอบใบรับรอง SSL ของ Telegram API — ปิด (false) ถ้าเครื่องมี proxy/โปรแกรมกันไวรัสที่ intercept HTTPS
+; แล้วขึ้นข้อผิดพลาด CERTIFICATE_VERIFY_FAILED
+telegram_verify_ssl = true
+; --- SMTP email ---
+; smtp_host เช่น smtp.gmail.com / smtp.office365.com / smtp.yourmail.com
+smtp_host =
+; 587 = STARTTLS (ส่วนใหญ่ใช้) / 465 = SMTPS ตรง
+smtp_port = 587
+smtp_user =
+smtp_password =
+smtp_to =
+; กันสแปมเมื่อโจมตีหนัก: ส่งอย่างน้อยทุกกี่วินาที (ข้อความระหว่างนั้นรวมเป็นชุดเดียว) — 0 = ส่งทันทีทุกครั้ง
+cooldown_seconds = 60
 """
 
 
@@ -235,14 +261,22 @@ def get_list(parser, section, key, fallback=None):
     return [x.strip() for x in raw.split(",") if x.strip()]
 
 
-def setup_logging(level_name="INFO"):
+def setup_logging(level_name="INFO", cfg=None):
     from logging.handlers import RotatingFileHandler
 
     level = getattr(logging, str(level_name).upper(), logging.INFO)
+    max_mb = 5
+    backups = 5
+    if cfg is not None:
+        max_mb = get_int(cfg, "general", "log_max_mb", 5)
+        backups = get_int(cfg, "general", "log_backups", 5)
     handlers = [logging.StreamHandler(sys.stdout)]
     try:
         file_handler = RotatingFileHandler(
-            LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8"
+            LOG_FILE,
+            maxBytes=max(1, max_mb) * 1024 * 1024,
+            backupCount=max(0, backups),
+            encoding="utf-8",
         )
         handlers.append(file_handler)
     except Exception:

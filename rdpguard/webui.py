@@ -27,7 +27,8 @@ _WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 
 _LOGIN_MAX_FAILS = 5
 _LOGIN_LOCK_SECONDS = 300
-_login_guard = {"fails": 0, "locked_until": 0.0}
+_LOGIN_MAX_ENTRIES = 1000  # กัน DoS ด้วย IP ปลอมจำนวนมาก
+_login_guard = {}  # ip -> {"fails": int, "locked_until": float} — per-IP (ไม่ล็อกทั้งระบบ)
 _login_lock = threading.Lock()  # กัน read-modify-write ชนเมื่อโจมตี login พร้อมกันหลาย connection
 
 _SESSION_MAX_AGE = 24 * 3600
@@ -293,6 +294,21 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
         except Exception:
             return {}
 
+    def _check_origin(self):
+        """กัน CSRF: ถ้ามี Origin/Referer ต้องตรงกับ Host (browser ส่งมาเสมอ;
+        curl/CLI ไม่มี Origin → อนุญาต)"""
+        origin = self.headers.get("Origin") or self.headers.get("Referer")
+        if not origin:
+            return True
+        host = self.headers.get("Host", "")
+        if not host:
+            return False
+        try:
+            parsed = urllib.parse.urlparse(origin)
+            return parsed.netloc == host
+        except Exception:
+            return False
+
     def _cookie_value(self, name):
         raw = self.headers.get("Cookie", "")
         for part in raw.split(";"):
@@ -310,6 +326,9 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
             if not expires or expires <= time.time():
                 _sessions.pop(token, None)
                 return False
+            # sliding: ต่ออายุเมื่อเหลือน้อยกว่าครึ่งของ TTL (ไม่ touch ทุก request)
+            if expires - time.time() < _SESSION_MAX_AGE / 2:
+                _sessions[token] = time.time() + _SESSION_MAX_AGE
             return True
 
     def _require_auth(self):
@@ -381,6 +400,9 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+        if not self._check_origin():
+            _json_error(self, "Origin ไม่ตรงกับ Host — ปฏิเสธ (กัน CSRF)", status=403)
+            return
         body = self._read_body()
         if path == "/api/login":
             self._handle_login(body)
@@ -419,6 +441,9 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
         elif path == "/api/self-test":
             if self._require_auth():
                 self._handle_self_test()
+        elif path == "/api/notify/test":
+            if self._require_auth():
+                self._handle_notify_test()
         else:
             _json_error(self, "ไม่พบเส้นทาง", status=404)
 
@@ -441,9 +466,15 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
 
     def _handle_login(self, body):
         now = time.time()
+        ip = self.client_address[0] if self.client_address else "?"
         with _login_lock:
-            if _login_guard["locked_until"] > now:
-                left = int(_login_guard["locked_until"] - now)
+            # ล้าง entry ที่หมดล็อกแล้ว ถ้าโตเกิน cap (กัน IP ปลอมเยอะ ๆ)
+            if len(_login_guard) > _LOGIN_MAX_ENTRIES:
+                for k in [k for k, v in _login_guard.items() if v["locked_until"] <= now]:
+                    _login_guard.pop(k, None)
+            entry = _login_guard.setdefault(ip, {"fails": 0, "locked_until": 0.0})
+            if entry["locked_until"] > now:
+                left = int(entry["locked_until"] - now)
                 _json_error(self, f"พยายามมากเกินไป — รอ {left} วินาที", status=429)
                 return
         cfg = config_mod.load_config()
@@ -452,7 +483,8 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
         if expected and secrets.compare_digest(given, expected):
             token = _new_session()
             with _login_lock:
-                _login_guard["fails"] = 0
+                entry = _login_guard.setdefault(ip, {"fails": 0, "locked_until": 0.0})
+                entry["fails"] = 0
             _json_ok(
                 self,
                 {"token": token},
@@ -465,11 +497,12 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
             )
             return
         with _login_lock:
-            _login_guard["fails"] += 1
-            if _login_guard["fails"] >= _LOGIN_MAX_FAILS:
-                _login_guard["locked_until"] = now + _LOGIN_LOCK_SECONDS
-                _login_guard["fails"] = 0
-                _json_error(self, "รหัสผิด 5 ครั้ง — ล็อกการพยายาม 5 นาที", status=429)
+            entry = _login_guard.setdefault(ip, {"fails": 0, "locked_until": 0.0})
+            entry["fails"] += 1
+            if entry["fails"] >= _LOGIN_MAX_FAILS:
+                entry["locked_until"] = now + _LOGIN_LOCK_SECONDS
+                entry["fails"] = 0
+                _json_error(self, "รหัสผิด 5 ครั้ง — ล็อกการพยายาม 5 นาที (เฉพาะ IP นี้)", status=429)
                 return
         _json_error(self, "รหัสไม่ถูกต้อง", status=401)
 
@@ -530,6 +563,14 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
             },
         }
         _json_ok(self, data)
+
+    def _handle_notify_test(self):
+        """ส่งข้อความทดสอบผ่านช่องทางแจ้งเตือนที่ตั้งค่าไว้"""
+        if not _monitor or not _monitor.notifier:
+            _json_error(self, "monitor ไม่ได้รัน")
+            return
+        results = _monitor.notifier.test()
+        _json_ok(self, {"message": "ผลทดสอบแจ้งเตือน", "results": results})
 
     def _handle_unblock_all(self):
         """ฉุกเฉิน: ปลดบล็อกทุก IP (ลบ rule firewall ทั้งหมดของ RDPGuard)"""
@@ -795,7 +836,7 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
         _json_ok(self, data)
 
     def _handle_save_settings(self, body):
-        allowed_sections = {"monitor", "detection", "firewall", "webui", "engines"}
+        allowed_sections = {"monitor", "detection", "firewall", "webui", "engines", "notify"}
         allowed_keys = {
             "monitor": {"enable", "poll_interval_seconds", "logon_types"},
             "detection": {
@@ -830,6 +871,19 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
                 "iis_log_dir",
                 "mysql_log_dir",
                 "generic_logs",
+            },
+            "notify": {
+                "enable",
+                "channel",
+                "telegram_bot_token",
+                "telegram_chat_id",
+                "telegram_verify_ssl",
+                "smtp_host",
+                "smtp_port",
+                "smtp_user",
+                "smtp_password",
+                "smtp_to",
+                "cooldown_seconds",
             },
         }
         if not isinstance(body, dict):
@@ -926,16 +980,18 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
         if not self._require_auth():
             return
         try:
-            lines = min(int(query.get("lines", ["200"])[0]), 2000)
+            lines = max(1, min(int(query.get("lines", ["200"])[0]), 2000))
         except ValueError:
             lines = 200
         log_file = config_mod.LOG_FILE
         content = []
+        file_size = 0
         if os.path.isfile(log_file):
             try:
                 with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
                     f.seek(0, os.SEEK_END)
                     size = f.tell()
+                    file_size = size
                     chunk = min(size, 64 * 1024)
                     f.seek(max(0, size - chunk))
                     data = f.read()
@@ -943,7 +999,7 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 _json_error(self, f"อ่าน log ไม่ได้: {exc}")
                 return
-        _json_ok(self, {"lines": content, "file": log_file})
+        _json_ok(self, {"lines": content, "file": log_file, "file_size": file_size})
 
     def _handle_geoip(self, body):
         ips = body.get("ips", [])

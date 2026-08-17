@@ -22,11 +22,26 @@ class Monitor:
         self.cfg = cfg or config_mod.load_config()
         self.db = Database()
         self._apply_fw_config()
-        self.detector = BruteForceDetector(self.db, self.fw, cfg=self.cfg)
+        self.notifier = None
+        self._init_notifier()
+        self.detector = BruteForceDetector(self.db, self.fw, cfg=self.cfg, on_block=self._on_block)
         self._engines = []
         self._stop = threading.Event()
         self._cleaner = None
         self.running = False
+
+    def _init_notifier(self):
+        from .notify import Notifier
+
+        self.notifier = Notifier(self.cfg)
+
+    def _on_block(self, ip, source, reason="", expires=""):
+        """detector บล็อก IP แล้ว — ส่งการแจ้งเตือน (ถ้าเปิด)"""
+        try:
+            if self.notifier:
+                self.notifier.notify_block(ip, source, reason, expires)
+        except Exception:
+            log.exception("เรียก notifier ล้มเหลว")
 
     def _apply_fw_config(self):
         prefix = config_mod.get(self.cfg, "firewall", "rule_prefix", "RDPGuard Block")
@@ -40,6 +55,8 @@ class Monitor:
         self.cfg = config_mod.load_config()
         self.detector.reload(self.cfg)
         self._apply_fw_config()
+        if self.notifier:
+            self.notifier.reload(self.cfg)
         self._restart_engines()
         log.info("โหลด config ใหม่เรียบร้อย")
 
@@ -92,6 +109,7 @@ class Monitor:
         self.db.accumulate_cleanup(
             config_mod.get_int(self.cfg, "detection", "accumulate_window_hours", 0)
         )
+        self.db.cleanup_geoip()
         expired = self.db.expired_blocks()
         for row in expired:
             ip = row["ip"]

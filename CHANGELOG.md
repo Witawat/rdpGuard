@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.6.3 (2026-08-17)
+
+- **แก้ Telegram error `CERTIFICATE_VERIFY_FAILED` (self-signed certificate)** — เกิดจาก proxy/โปรแกรมกันไวรัสที่ intercept HTTPS: เพิ่มตัวเลือก **"ตรวจสอบ SSL ของ Telegram"** (ตั้งค่า → แจ้งเตือน, config `telegram_verify_ssl`) — ปิดได้เมื่อขึ้น error นี้
+- ข้อความ error ใหม่: ถ้าเจอ CERTIFICATE_VERIFY_FAILED จะแนะนำวิธีแก้ในข้อความเลย
+
+## 1.6.2 (2026-08-17)
+
+- **Log การทำงาน: ตั้งค่าได้ + แสดงข้อมูล** — dropdown เลือกจำนวนบรรทัด (250/500/1000) ในพาเนล Log + แสดงขนาดไฟล์ (KB/MB) ข้างชื่อไฟล์
+- **ตั้งค่าการหมุนเวียน log ได้** — config `[general] log_max_mb` (ค่าเริ่มต้น 5 MB/ไฟล์) + `log_backups` (5 ไฟล์) — log ไม่โตเกินจำกัด; ระบบอ่านเฉพาะ 64KB ท้ายสุดของไฟล์ต่อ request (ไม่ค้างแม้ log เต็ม)
+- แก้บั๊ก: `lines` ของ /api/log clamp 1-2000 (เดิม `-1` = ได้ทุกบรรทัดใน chunk)
+
+## 1.6.1 (2026-08-17)
+
+- **แจ้งเตือนเลือกช่องทางได้** — หน้า ตั้งค่า → แจ้งเตือน: dropdown "ช่องทางที่ใช้" (`both` ทั้งคู่ / `telegram` เท่านั้น / `email` เท่านั้น) — ระบบส่งเฉพาะช่องที่เลือก (ปุ่มทดสอบก็เคารพการเลือกด้วย)
+- **แก้บั๊ก: บันทึกการตั้งค่าพังตั้งแต่ v1.5.3** — `settings-group` div มี `data-sec` (ใช้จัด layout) → save handler จับ div ด้วย → `el.value` undefined → TypeError กดบันทึกไม่ได้ — ตอนนี้ฟิลเตอร์เฉพาะ input/select แล้ว
+
+## 1.6.0 (2026-08-17)
+
+### ฟีเจอร์ใหม่
+
+- **แจ้งเตือนเมื่อบล็อก IP (Telegram + Email)** — ตั้งค่าใน Web UI หน้า ตั้งค่า → "แจ้งเตือน (Telegram / Email)": Bot Token/Chat ID (จาก @BotFather) และ/หรือ SMTP (587 STARTTLS / 465 SSL) — ข้อความรวมหลาย IP ในรอบ `cooldown_seconds` (ค่าเริ่มต้น 60 วิ — กันสแปมตอนโจมตีหนัก) ส่งผ่าน worker thread แยก (ไม่หน่วงการบล็อก) + retry 2 ครั้ง — มีปุ่ม "ส่งข้อความทดสอบ" ในหน้า ตั้งค่า
+- **single-instance guard** — รัน `run`/service ซ้ำ → เตือน "มี RDPGuard รันอยู่แล้ว" แทนการ bind พอร์ตชนเงียบ ๆ (Global mutex — ครอบทั้ง service และ standalone)
+- **กัน CSRF** — POST ทุก request ตรวจ `Origin`/`Referer` ต้องตรงกับ Host (browser เก่า/iframe โจมตีไม่ได้; curl/CLI ไม่มี Origin ผ่านได้)
+
+### ปรับปรุง / แก้บั๊ก
+
+- **login-guard per-IP** (แทน global) — เดารหัสผิด 5 ครั้งล็อกเฉพาะ IP นั้น (เดิมล็อกทั้งระบบ — ใครก็ DoS หน้า login ได้) + จำกัด 1000 entries กัน IP ปลอม
+- **UI session sliding** — ต่ออายุ session เมื่อเหลือ < ครึ่งของ 24 ชม. (ใช้งานต่อไม่หลุด)
+- **GeoIP cache bound** — ลบ entry เก่ากว่า 30 วัน + จำกัด 10,000 แถว (DB) / 5,000 (RAM) — ไม่โตไม่รู้จบ
+- **copytruncate กันนับซ้ำ** — ไฟล์ log ที่ถูก truncate (ขนาดลด) จะข้ามบรรทัดซ้ำกับบรรทัดสุดท้ายที่อ่านแล้ว (sentinel)
+- **SQLite WAL mode** — เขียน/อ่านพร้อมกันจากหลาย thread ไม่ติด lock กัน (เครื่องโจมตีหนัก 4625 เยอะ) + busy_timeout
+
+## 1.5.7 (2026-08-16)
+
+- **exe เล็กลงด้วย UPX** — build.bat ดาวน์โหลด UPX (v5.2.0) ให้อัตโนมัติครั้งแรก (เก็บใน `tools\` — gitignore แล้ว) แล้วใช้บีบอัด DLLs ภายใน exe — ขนาดลดจาก 14.97 MB → **12.38 MB** (-17%) — `rdpguard.spec` ตั้ง `upx=True` ไว้แล้ว (เดิมไม่มี upx.exe เลยถูกข้ามไปเงียบ ๆ)
+- หมายเหตุ: exe ที่ผ่าน UPX อาจถูก AV บางตัวฟลากง่ายขึ้น (packed executable) — ถ้าโดน ให้เพิ่ม exclude/รายงาน
+
 ## 1.5.6 (2026-08-16)
 
 - **แก้ `uninstall.bat`**: ESC literal → `prompt $E` (กัน cmd parse พังข้ามเครื่อง เหมือน build.bat) — พร้อมเทสต์จริงครบ flow

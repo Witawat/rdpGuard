@@ -17,6 +17,14 @@ log = logging.getLogger("RDPGuard.geoip")
 _mem = {}
 _lock = threading.Lock()
 _last_call = 0.0
+_MEM_MAX = 5000  # จำกัดแคชในหน่วยความจำ (FIFO)
+
+
+def _mem_set(ip, data):
+    if len(_mem) >= _MEM_MAX:
+        for k in list(_mem)[:1000]:  # ลบของเก่าที่สุด 1,000 ตัวก่อน
+            _mem.pop(k, None)
+    _mem[ip] = data
 
 _USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) RDPGuard"
 
@@ -86,7 +94,7 @@ def lookup(ip, db=None):
         cached = db.get_geoip(ip)
         if cached and cached[0]:
             result = {"code": cached[0], "country": cached[1], "flag": _flag(cached[0])}
-            _mem[ip] = result
+            _mem_set(ip, result)
             return result
     result = _lookup_online(ip)
     if result:
@@ -94,7 +102,7 @@ def lookup(ip, db=None):
         if db is not None and code:
             db.set_geoip(ip, code, country)
         data = {"code": code, "country": country, "flag": _flag(code)}
-        _mem[ip] = data
+        _mem_set(ip, data)
         return data
     return None
 

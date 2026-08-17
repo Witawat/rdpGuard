@@ -13,6 +13,25 @@ set "RST=%ESC%[0m"
 
 cd /d "%~dp0"
 
+rem ---- UPX (บีบอัด exe ให้เล็กลง ~50-60%) ----
+rem ดาวน์โหลดอัตโนมัติครั้งแรก (Windows 10+ มี curl + tar ในตัว) — โหลดครั้งเดียว เก็บใน tools\
+set "UPX_VERSION=v5.2.0"
+set "UPX_BIN=tools\upx-5.2.0-win64\upx.exe"
+if not exist "%UPX_BIN%" (
+    echo %YEL%[*]%RST% Downloading UPX %UPX_VERSION%...
+    if not exist "tools" mkdir tools
+    curl -sL -o tools\upx.zip "https://github.com/upx/upx/releases/download/%UPX_VERSION%/upx-5.2.0-win64.zip"
+    if errorlevel 1 (
+        echo %RED%[x]%RST% Download UPX failed - check network.
+        pause
+        exit /b 1
+    )
+    tar -xf tools\upx.zip -C tools
+    del tools\upx.zip
+)
+set "PATH=%~dp0tools\upx-5.2.0-win64;%PATH%"
+echo %GRN%[+]%RST% UPX ready: %UPX_BIN%
+
 echo %YEL%[*]%RST% Installing pyinstaller...
 python -m pip install pyinstaller
 if errorlevel 1 (
@@ -31,7 +50,6 @@ if errorlevel 1 (
 
 echo.
 echo %GRN%[+]%RST% Build complete: dist\rdpguard.exe
-
 rem ---- เลือกว่า: จบแค่บิว หรือ บิวแล้วติดตั้ง service ----
 rem ใช้กับ argument ได้: build.bat build / build.bat install (ไม่ถาม)
 set "MODE=%~1"

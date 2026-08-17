@@ -164,13 +164,15 @@ input.mono { font-family: "Cascadia Code", Consolas, monospace; }
       "monitor detection"
       "firewall detection"
       "webui detection"
-      "engines engines";
+      "engines engines"
+      "notify notify";
   }
   .settings-group[data-sec="monitor"] { grid-area: monitor; }
   .settings-group[data-sec="detection"] { grid-area: detection; }
   .settings-group[data-sec="firewall"] { grid-area: firewall; }
   .settings-group[data-sec="webui"] { grid-area: webui; }
   .settings-group[data-sec="engines"] { grid-area: engines; }
+  .settings-group[data-sec="notify"] { grid-area: notify; }
 }
 .settings-group h3 { margin: 0 0 0.65rem; font-size: 0.88rem; color: var(--ink-2); }
 .field {

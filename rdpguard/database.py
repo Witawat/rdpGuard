@@ -99,6 +99,13 @@ class Database:
     def __init__(self, db_file=None):
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(db_file or config_mod.DB_FILE, check_same_thread=False)
+        # WAL: เขียน-อ่านพร้อมกันจากหลาย thread (engine/webui/cleanup) ไม่ติด lock กัน
+        try:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA busy_timeout=5000")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+        except Exception:
+            pass
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
         self._migrate()
@@ -331,3 +338,18 @@ class Database:
             "INSERT OR REPLACE INTO geoip_cache(ip, code, country, ts) VALUES(?,?,?,?)",
             (ip, code or "", country or "", _now_iso()),
         )
+
+    def cleanup_geoip(self, max_age_days=30, max_rows=10000):
+        """จำกัดขนาด geoip_cache: ลบ entry เก่าเกินกำหนด + ถ้าเกินจำนวนสูงสุด ลบของเก่าสุด"""
+        since = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        self._execute("DELETE FROM geoip_cache WHERE ts < ?", (since,))
+        count = self._query("SELECT COUNT(*) AS n FROM geoip_cache")[0]["n"]
+        if count > max_rows:
+            excess = count - max_rows
+            self._execute(
+                "DELETE FROM geoip_cache WHERE rowid IN "
+                "(SELECT rowid FROM geoip_cache ORDER BY ts ASC LIMIT ?)",
+                (excess,),
+            )

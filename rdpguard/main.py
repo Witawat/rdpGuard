@@ -76,12 +76,33 @@ def _cmd_status():
         print(status.get("message", "service ยังไม่ติดตั้ง"))
 
 
+def _single_instance_guard():
+    """กันรัน 2 instance พร้อมกัน (monitor + firewall + DB ชนกันได้)
+
+    คืน mutex handle ถ้าครองได้ / "skip" ถ้าใช้ไม่ได้ (ไม่มีสิทธิ์ Global mutex) / None ถ้ามี instance อื่นอยู่"""
+    try:
+        import win32event
+        import win32api
+
+        handle = win32event.CreateMutex(None, False, "Global\\RDPGuard")
+        if win32api.GetLastError() == win32event.ERROR_ALREADY_EXISTS:
+            return None
+        return handle
+    except Exception:
+        return "skip"
+
+
 def _cmd_run(open_browser=False):
+    guard = _single_instance_guard()
+    if guard is None:
+        print("มี RDPGuard รันอยู่แล้ว (instance เดียว) — เปิด Web UI ที่ http://127.0.0.1:8123")
+        print("หรือหยุด instance/Service เดิมก่อนรันใหม่")
+        return
     from . import config as config_mod
 
     config_mod.ensure_config()
     cfg = config_mod.load_config()
-    config_mod.setup_logging(config_mod.get(cfg, "general", "log_level", "INFO"))
+    config_mod.setup_logging(config_mod.get(cfg, "general", "log_level", "INFO"), cfg)
 
     from .monitor import Monitor
     from .webui import start_webui
@@ -112,6 +133,13 @@ def _cmd_run(open_browser=False):
         ui.stop()
         monitor.stop()
         monitor.db.close()
+        if guard not in ("skip", None):
+            try:
+                import win32api
+
+                win32api.CloseHandle(guard)
+            except Exception:
+                pass
         print("หยุดแล้ว")
 
 
@@ -120,7 +148,7 @@ def _cmd_web(open_browser=True):
 
     config_mod.ensure_config()
     cfg = config_mod.load_config()
-    config_mod.setup_logging(config_mod.get(cfg, "general", "log_level", "INFO"))
+    config_mod.setup_logging(config_mod.get(cfg, "general", "log_level", "INFO"), cfg)
     from .webui import start_webui
 
     host = config_mod.get(cfg, "webui", "host", "127.0.0.1")

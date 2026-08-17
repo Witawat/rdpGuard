@@ -7,6 +7,9 @@ __pycache__/
 build/
 dist/
 
+# UPX (ดาวน์โหลดอัตโนมัติโดย build.bat — ไม่ commit binary)
+tools/
+
 # Runtime data (ไม่ควร commit — ถูกสร้างตอนรันที่ %ProgramData%\RDPGuard)
 *.db
 *.log

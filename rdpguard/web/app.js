@@ -742,17 +742,23 @@ let _logSeq = 0;
 async function refreshLog() {
   const seq = ++_logSeq;
   try {
-    const { data } = await api("/api/log?lines=250");
+    const lines = $("log-lines") ? $("log-lines").value : 250;
+    const { data } = await api("/api/log?lines=" + lines);
     if (seq !== _logSeq) return;
     const view = $("log-view");
     const nearBottom = view.scrollHeight - view.scrollTop - view.clientHeight < 80;
     view.textContent = data.lines.length ? data.lines.join("\n") : "(log ว่างเปล่า)";
     if (nearBottom) view.scrollTop = view.scrollHeight;
     $("log-file-hint").textContent = data.file || "";
+    const sz = data.file_size || 0;
+    $("log-size-hint").textContent = sz > 0
+      ? (sz < 1048576 ? `(${Math.max(1, Math.round(sz / 1024))} KB)` : `(${(sz / 1048576).toFixed(1)} MB)`)
+      : "";
   } catch (e) {}
 }
 
 $("log-refresh").addEventListener("click", refreshLog);
+$("log-lines").addEventListener("change", refreshLog);
 
 /* ---------- settings ---------- */
 
@@ -817,6 +823,23 @@ const SETTINGS_UI = {
       { key: "iis_log_dir", label: "โฟลเดอร์ IIS log (ว่าง = auto)", type: "text" },
       { key: "mysql_log_dir", label: "โฟลเดอร์ MySQL log (ว่าง = auto)", type: "text" },
       { key: "generic_logs", label: "Generic log engine: ไฟล์ + regex", type: "generic_logs" },
+    ],
+  },
+  notify: {
+    title: "แจ้งเตือน (Telegram / Email)",
+    fields: [
+      { key: "enable", label: "เปิดการแจ้งเตือนเมื่อบล็อก IP", type: "bool" },
+      { key: "channel", label: "ช่องทางที่ใช้", type: "select", options: [{ v: "both", l: "ทั้งสองช่องทาง" }, { v: "telegram", l: "Telegram เท่านั้น" }, { v: "email", l: "Email เท่านั้น" }] },
+      { key: "telegram_bot_token", label: "Telegram: Bot Token (จาก @BotFather)", type: "text" },
+      { key: "telegram_chat_id", label: "Telegram: Chat ID", type: "text" },
+      { key: "telegram_verify_ssl", label: "ตรวจสอบ SSL ของ Telegram (ปิดถ้า proxy/กันไวรัส intercept HTTPS แล้วขึ้น CERTIFICATE_VERIFY_FAILED)", type: "bool" },
+      { key: "smtp_host", label: "SMTP: Host (เช่น smtp.gmail.com)", type: "text" },
+      { key: "smtp_port", label: "SMTP: พอร์ต (587 = STARTTLS, 465 = SSL)", type: "int" },
+      { key: "smtp_user", label: "SMTP: ผู้ใช้", type: "text" },
+      { key: "smtp_password", label: "SMTP: รหัสผ่าน", type: "text" },
+      { key: "smtp_to", label: "SMTP: ผู้รับ", type: "text" },
+      { key: "cooldown_seconds", label: "เว้นช่วงส่ง (วินาที, 0 = ส่งทันที)", type: "int" },
+      { key: "_notify_test", label: "ทดสอบการแจ้งเตือน", type: "notify_test" },
     ],
   },
 };
@@ -921,7 +944,11 @@ async function refreshSettings() {
           field.innerHTML = `<label>${f.label}</label>
             <span class="check"><input type="checkbox" data-sec="${section}" data-key="${f.key}" ${String(values[f.key]) === "true" ? "checked" : ""}></span>`;
         } else if (f.type === "select") {
-          const opts = f.options.map((o) => `<option ${values[f.key] === o ? "selected" : ""}>${o}</option>`).join("");
+          const opts = f.options.map((o) => {
+            const v = typeof o === "object" ? o.v : o;
+            const l = typeof o === "object" ? o.l : o;
+            return `<option value="${v}" ${String(values[f.key]) === String(v) ? "selected" : ""}>${l}</option>`;
+          }).join("");
           field.innerHTML = `<label>${f.label}</label><select data-sec="${section}" data-key="${f.key}">${opts}</select>`;
         } else if (f.type === "generic_logs") {
           field.innerHTML = `<label>${f.label}<span class="gen-hint">รายการละ ชื่อ=path|regex — คั่นหลายรายการด้วย ; ดูตัวอย่างใน GENERIC.md</span></label>`;
@@ -930,6 +957,35 @@ async function refreshSettings() {
           box.innerHTML = `<input type="hidden" data-sec="${section}" data-key="${f.key}">`;
           field.appendChild(box);
           renderGenericEditor(box, values[f.key] || "");
+        } else if (f.type === "notify_test") {
+          field.innerHTML = `<label>${f.label}<span class="gen-hint">ต้องกด "บันทึกการตั้งค่า" ก่อน เพื่อให้ค่าที่ตั้งถูกโหลด</span></label>`;
+          const box = document.createElement("div");
+          box.className = "check";
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.textContent = "ส่งข้อความทดสอบ";
+          const msg = document.createElement("span");
+          msg.className = "gen-warn";
+          msg.style.display = "none";
+          btn.addEventListener("click", async () => {
+            btn.disabled = true;
+            msg.style.display = "";
+            msg.style.color = "var(--muted)";
+            msg.textContent = "กำลังส่ง...";
+            try {
+              const { data } = await api("/api/notify/test", { method: "POST", body: "{}", timeout: 60000 });
+              const r = data.results || {};
+              msg.style.color = "var(--ink-2)";
+              msg.textContent = `Telegram: ${r.telegram || "-"} · Email: ${r.email || "-"}`;
+            } catch (e) {
+              msg.style.color = "var(--danger)";
+              msg.textContent = e.message;
+            }
+            btn.disabled = false;
+          });
+          box.appendChild(btn);
+          box.appendChild(msg);
+          field.appendChild(box);
         } else {
           field.innerHTML = `<label>${f.label}</label><input type="text" data-sec="${section}" data-key="${f.key}" value="${esc(values[f.key] ?? "")}">`;
         }
@@ -943,6 +999,7 @@ async function refreshSettings() {
 $("settings-save").addEventListener("click", async () => {
   const payload = {};
   document.querySelectorAll("[data-sec]").forEach((el) => {
+    if (el.tagName !== "INPUT" && el.tagName !== "SELECT") return; // ข้าม container div (settings-group)
     const sec = el.dataset.sec;
     const key = el.dataset.key;
     if (!payload[sec]) payload[sec] = {};
