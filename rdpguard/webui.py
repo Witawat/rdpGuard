@@ -73,7 +73,7 @@ _SECRET_KEYS = {
 
 _BOOL_KEYS = {
     "enable", "auto_extend", "skip_local_ips", "escalate_to_permanent", "single_rule",
-    "telegram_verify_ssl", "webhook_enable", "webhook_verify_ssl",
+    "telegram_verify_ssl", "webhook_enable", "webhook_verify_ssl", "enable_commands",
 }
 
 _INT_RANGES = {
@@ -96,6 +96,8 @@ _INT_RANGES = {
     ("webui", "port"): (1, 65535),
     ("notify", "smtp_port"): (1, 65535),
     ("notify", "cooldown_seconds"): (0, 86400),
+    ("notify", "confirm_timeout_seconds"): (5, 3600),
+    ("notify", "rate_limit_per_minute"): (1, 600),
 }
 
 
@@ -127,6 +129,11 @@ def _validate_setting(section, key, value):
         return "รหัสผ่าน Web UI ต้องยาวอย่างน้อย 8 ตัวอักษร"
     if section == "notify" and key == "webhook_url" and value and not value.lower().startswith(("http://", "https://")):
         return "notify.webhook_url ต้องขึ้นต้นด้วย http:// หรือ https://"
+    if section == "notify" and key == "hostname" and value:
+        import re as _re
+
+        if not _re.fullmatch(r"[A-Za-z0-9_-]+", value):
+            return "ชื่อเครื่องห้ามมีช่องว่างหรือ @ — ใช้ตัวอักษร ตัวเลข - หรือ _"
     return None
 
 
@@ -496,6 +503,8 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
             self._handle_audit_export(query)
         elif path == "/api/notify/status":
             self._handle_notify_status()
+        elif path == "/api/telegram/status":
+            self._handle_telegram_status()
         elif path == "/api/backup":
             self._handle_backup()
         else:
@@ -715,6 +724,17 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
             from .notify import Notifier
 
             status = Notifier(config_mod.load_config(), start_worker=False).status()
+        _json_ok(self, status)
+
+    def _handle_telegram_status(self):
+        if not self._require_auth():
+            return
+        if _monitor and _monitor.tg:
+            status = _monitor.tg.status()
+        else:
+            from .tgcmd import TelegramCommandBot
+
+            status = TelegramCommandBot(None).status()
         _json_ok(self, status)
 
     def _handle_unblock_all(self):
@@ -1253,6 +1273,7 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
             "notify": {
                 "enable",
                 "channel",
+                "hostname",
                 "telegram_bot_token",
                 "telegram_chat_id",
                 "telegram_verify_ssl",
@@ -1265,6 +1286,9 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
                 "webhook_enable",
                 "webhook_url",
                 "webhook_verify_ssl",
+                "enable_commands",
+                "confirm_timeout_seconds",
+                "rate_limit_per_minute",
             },
         }
         if not isinstance(body, dict):

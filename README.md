@@ -6,7 +6,7 @@ RDP brute-force protection สำหรับ Windows Server / Windows Desktop �
 
 | รายการ | ค่า |
 |---|---|
-| เวอร์ชัน | 1.7.0 |
+| เวอร์ชัน | 1.8.0 |
 | ภาษา | Python 3.8+ |
 | Windows | source: 7 SP1 / 8.1 / 10 / 11 + Server 2008 R2 SP1 ขึ้นไป · exe (build ด้วย Python 3.11): 8.1 / 10 / 11 + Server 2012 ขึ้นไป (ดู INSTALL.md) |
 | Dependency | pywin32 อย่างเดียว (web UI ใช้ stdlib ล้วน) |
@@ -35,7 +35,8 @@ RDP brute-force protection สำหรับ Windows Server / Windows Desktop �
 - **กันบล็อกตัวเอง** — ข้าม loopback / IP เครื่องตัวเอง / วง LAN ส่วนตัว (เปิดปิดได้)
 - **CLI ครบ** — ติดตั้ง/ถอน/เริ่ม/หยุด service, บล็อก/ปลดบล็อก IP, ดูรีเซ็ตรหัสผ่าน
 - **Build เป็น exe ได้** — ใช้ PyInstaller (build.bat) ไม่ต้องลง Python บนเครื่องเป้าหมาย
-- **แจ้งเตือนเมื่อบล็อก IP** — Telegram และ/หรือ Email (SMTP) เลือกช่องทางได้ มี cooldown รวมข้อความและ retry แบบ background ไม่หน่วงการบล็อก
+- **แจ้งเตือนเมื่อบล็อก IP** — Telegram และ/หรือ Email (SMTP) เลือกช่องทางได้ มี cooldown รวมข้อความและ retry แบบ background ไม่หน่วงการบล็อก — ทุกข้อความระบุ `[ชื่อเครื่อง]` (ตั้งเองได้ ใช้เฝ้าหลายเครื่องได้)
+- **ควบคุมผ่าน Telegram** — รับคำสั่ง `/status`, `/block`, `/unblock`, `/list` ฯลฯ ผ่าน Bot API (long-polling ไม่ต้องเปิดพอร์ต) — รองรับหลายเครื่องกับ bot เดียว: สั่งเครื่องเป้าหมายด้วย `/status @ชื่อเครื่อง`, ทุกคำตอบบอกว่า `[ชื่อเครื่อง]` ไหนตอบอยู่, มี `/where` ดูชื่อเครื่อง
 - **จัดการ Log** — หมุนไฟล์อัตโนมัติ (ค่าเริ่มต้น 5 MB/ไฟล์ + เก็บสำรอง 5 ไฟล์), เลือกดู 250/500/1000 บรรทัด และแสดงขนาดไฟล์ใน Web UI
 - **ทำงานทนขึ้น** — กันรันซ้ำ, ป้องกัน CSRF, จำกัดการเดารหัสแยกต่อ IP, session sliding, SQLite WAL และจำกัดขนาด GeoIP cache
 - **ค้นหา/ส่งออก/ประวัติ** — กรอง Events และ Blocked, แบ่งหน้า, ส่งออก CSV, ดูประวัติปลดบล็อกและ Audit Log
@@ -72,6 +73,7 @@ rdpGuard/
 │   ├── database.py          # SQLite (events, blocked, accumulate, whitelist, blacklist, geoip)
 │   ├── config.py            # อ่าน/เขียน config.ini
 │   ├── notify.py            # แจ้งเตือน Telegram/Email แบบ worker thread
+│   ├── tgcmd.py             # Telegram Command Bot (long-polling, หลายเครื่อง/@ชื่อเครื่อง)
 │   ├── webui.py             # Web UI + REST API (stdlib http.server)
 │   └── web/                 # index.html, app.js, style.css (UI ภาษาไทย)
 ├── run.py                   # runner หลัก (entry ของ service + PyInstaller)
@@ -96,6 +98,7 @@ rdpGuard/
 | [CONFIG.md](CONFIG.md) | อธิบาย config ทุกค่าพร้อมค่าเริ่มต้น |
 | [GENERIC.md](GENERIC.md) | ตั้งค่า Generic log engine และเขียน regex |
 | [FEATURES.md](FEATURES.md) | รายการฟีเจอร์ปัจจุบันและเฟสถัดไป |
+| [docs/ROADMAP-v1.9.0.md](docs/ROADMAP-v1.9.0.md) | แผนพัฒนา Watchdog, IP Detail, ตาราง และรายงาน |
 | [API.md](API.md) | REST API สำหรับนักพัฒนา |
 | [DESIGN.md](DESIGN.md) | design ของ Web UI |
 | [CHANGELOG.md](CHANGELOG.md) | ประวัติเวอร์ชัน |

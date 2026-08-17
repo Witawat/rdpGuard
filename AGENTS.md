@@ -24,6 +24,7 @@ build.bat build              # ดาวน์โหลด UPX/ติดตั�
 - `rdpguard/firewall.py` — HNetCfg COM + netsh fallback; `single_rule=true` (ค่าเริ่มต้น) = rule เดียว `RDPGuard Block` เก็บ IP ใน RemoteAddresses
 - `rdpguard/monitor.py` — cleanup 60 วิ (หมดอายุ, whitelist reconcile, firewall reconcile)
 - `rdpguard/notify.py` — แจ้งเตือน Telegram/Email แบบ worker thread, cooldown, retry และเลือกช่องทาง
+- `rdpguard/tgcmd.py` — Telegram Command Bot: รับคำสั่งผ่าน getUpdates long-polling, ตรวจ chat_id/rate limit, ยืนยันคำสั่งอันตราย, รองรับหลายเครื่องด้วย `@ชื่อเครื่อง` ต่อท้ายคำสั่ง (`[notify] hostname` = ชื่อเครื่อง ใช้ในข้อความแจ้งเตือนด้วย)
 - `rdpguard/webui.py` — web UI + REST API (stdlib http.server)
 - `rdpguard/web/` — UI ภาษาไทย (index.html / app.js / style.css)
 - `rdpguard/service.py` / `main.py` — Windows service / CLI
@@ -56,6 +57,8 @@ build.bat build              # ดาวน์โหลด UPX/ติดตั�
 - exe (build ด้วย Python 3.11) รันได้ Windows 8.1+ — Win7 ต้อง build ด้วย Python 3.8
 - ถ้า Telegram ขึ้น `CERTIFICATE_VERIFY_FAILED` จาก HTTPS interception ให้ปิด `telegram_verify_ssl` ในหน้าแจ้งเตือน; ใช้เฉพาะเครือข่ายที่เชื่อถือได้
 - v1.7.0: Events/Blocked/Audit มีตัวกรองและ CSV export · DB มี retention · Backup ล้างค่าลับ · Webhook เป็นช่องทางเสริม
+- v1.8.0: Telegram Command ควบคุม RDPGuard ผ่าน Bot API — ตรวจ chat_id/rate limit/confirm + Audit ทุกคำสั่ง
+- v1.9.0: ข้อความแจ้งเตือน/คำตอบทุกแบบขึ้นต้น `[ชื่อเครื่อง]` (`[notify] hostname` ว่าง = ชื่อเครื่องระบบ) — หลายเครื่องกับ bot เดียว: สั่งเป้าด้วย `@ชื่อเครื่อง` ต่อท้ายคำสั่ง (เครื่องไม่ตรงชื่อตอบปฏิเสธ ไม่ execute), `/where` ดูชื่อเครื่อง; hostname ห้ามมีช่องว่าง/@ (validation ใน webui.py)
 
 ## แผนพัฒนา (ถัดไป)
 

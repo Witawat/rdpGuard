@@ -11,6 +11,7 @@ import logging
 import os
 import secrets
 import shutil
+import socket
 import sys
 
 from . import __version__
@@ -211,6 +212,17 @@ webhook_enable = false
 webhook_url =
 ; ตรวจสอบ SSL ของ Webhook — ปิดได้เมื่อ proxy/AV intercept HTTPS
 webhook_verify_ssl = true
+; ชื่อเครื่อง (ว่าง = ใช้ชื่อเครื่องระบบอัตโนมัติ) — แสดงในข้อความแจ้งเตือน
+; และระบุเครื่องเป้าหมายเมื่อใช้ Telegram หลายเครื่องกับ bot เดียว (/status @ชื่อเครื่อง)
+; ห้ามมีช่องว่าง/@ — ใช้ตัวอักษร ตัวเลข - หรือ _
+hostname =
+; --- Telegram Command (ควบคุม RDPGuard ผ่าน Telegram) ---
+; เปิดรับคำสั่งจาก Telegram (ต้องตั้ง telegram_bot_token + telegram_chat_id แล้ว)
+enable_commands = false
+; คำสั่งอันตราย (/unblock-all) ต้องยืนยัน /confirm ภายในกี่วินาที
+confirm_timeout_seconds = 60
+; จำกัดคำสั่งต่อนาทีต่อแชท
+rate_limit_per_minute = 10
 """
 
 
@@ -282,6 +294,15 @@ def get_list(parser, section, key, fallback=None):
     if not raw:
         return list(fallback or [])
     return [x.strip() for x in raw.split(",") if x.strip()]
+
+
+def machine_name(parser=None):
+    """ชื่อเครื่อง: ค่า config [notify] hostname ถ้าว่างใช้ชื่อเครื่องระบบ"""
+    if parser is not None:
+        name = get(parser, "notify", "hostname", "").strip()
+        if name:
+            return name
+    return socket.gethostname()
 
 
 def setup_logging(level_name="INFO", cfg=None):

@@ -188,6 +188,12 @@ log ล่าสุด (รับค่า 1–2000; ค่าติดลบจ
 ### GET /api/notify/status
 คืนสถานะการตั้งค่าและผลการส่งล่าสุด โดยไม่คืนข้อมูลลับ
 
+### GET /api/telegram/status
+คืนสถานะ Telegram Command — เปิด/ปิด, polling ทำงานหรือไม่, chat_id ที่ตั้ง และคำสั่งล่าสุด
+```json
+{ "ok": true, "data": { "enabled": true, "running": true, "configured": true, "chat_id": "12345", "last_command": "/status", "last_result": "...", "last_ts": 0.0 } }
+```
+
 ### GET /api/trends?days=7
 คืนจำนวน Events `fail`/`success` รายวัน (สูงสุด 31 วัน)
 

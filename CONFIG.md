@@ -107,6 +107,7 @@ Engine เพิ่มเติม (engine RDP/Security เปิดถาวร
 |---|---|---|
 | `enable` | `false` | เปิดการแจ้งเตือนเมื่อบล็อก IP |
 | `channel` | `both` | ช่องทางที่ใช้: `both` (ทั้งคู่) / `telegram` / `email` |
+| `hostname` | *(ว่าง)* | ชื่อเครื่องแสดงในข้อความ Telegram (ว่าง = ชื่อเครื่องระบบ) — ใช้ระบุเป้าในคำสั่งด้วย เช่น `/status @srv-a`; ห้ามมีช่องว่าง/@ ใช้ตัวอักษร ตัวเลข `-` `_` |
 | `telegram_bot_token` | *(ว่าง)* | Bot Token จาก @BotFather |
 | `telegram_chat_id` | *(ว่าง)* | Chat ID ที่จะให้ส่งถึง (ตัวเลข หรือ @username) |
 | `telegram_verify_ssl` | `true` | ตรวจสอบใบรับรอง SSL ของ Telegram API — ตั้ง `false` ถ้าเครื่องมี proxy/กันไวรัสที่ intercept HTTPS แล้วขึ้น `CERTIFICATE_VERIFY_FAILED` |
@@ -118,8 +119,15 @@ Engine เพิ่มเติม (engine RDP/Security เปิดถาวร
 | `webhook_enable` | `false` | เปิด Webhook เสริมจาก Telegram/Email |
 | `webhook_url` | *(ว่าง)* | URL ที่รับ `POST` JSON รูปแบบ `{"text":"..."}` — ค่าจริงถูกซ่อนใน Web UI |
 | `webhook_verify_ssl` | `true` | ตรวจสอบ SSL ของ Webhook; ปิดได้เมื่อ proxy/โปรแกรมกันไวรัส intercept HTTPS |
+| `enable_commands` | `false` | เปิดรับคำสั่งควบคุม RDPGuard ผ่าน Telegram — ต้องตั้ง `telegram_bot_token` + `telegram_chat_id` แล้ว |
+| `confirm_timeout_seconds` | `60` | `/unblock-all` ต้องยืนยัน `/confirm` ภายในกี่วินาที |
+| `rate_limit_per_minute` | `10` | จำกัดจำนวนคำสั่งสูงสุดต่อนาทีต่อแชท |
 
-> ข้อความแจ้งเตือน: `บล็อก IP <ip> (<engine>) — <เหตุผล> — หมดอายุ <เวลา>` — ส่งแบบไม่บล็อก (worker thread) + retry 2 ครั้ง; ส่งไม่สำเร็จ log ใน `rdpguard.log`
+> Telegram Command รับคำสั่งจาก `telegram_chat_id` ที่ตั้งไว้เท่านั้น, มี rate limit ต่อนาที, บันทึกทุกคำสั่งลง Audit Log และไม่รองรับคำสั่ง shell/อ่านไฟล์ตามใจ — ควบคุมได้เฉพาะฟีเจอร์ RDPGuard
+>
+> **หลายเครื่อง / bot เดียว**: ตั้ง `hostname` ให้ต่างกัน (เช่น `srv-a`, `srv-b`) แล้วต่อท้ายคำสั่งด้วย `@ชื่อเครื่อง` เช่น `/status @srv-a` — เครื่องที่ไม่ใช่เป้าตอบปฏิเสธไม่ลงมือทำ; คำตอบทุกข้อขึ้นต้นด้วย `[ชื่อเครื่อง]` และคำสั่ง `/where` บอกชื่อเครื่องได้; หมายเหตุ: คำสั่งที่ส่งไปจะตกที่เครื่องใดเครื่องหนึ่งแบบสุ่ม (polling) — ส่งซ้ำจนกว่าคำตอบจะมาจากเครื่องที่ต้องการ
+
+> ข้อความแจ้งเตือน: `[ชื่อเครื่อง] บล็อก IP <ip> (<engine>) — <เหตุผล> — หมดอายุ <เวลา>` — ส่งแบบไม่บล็อก (worker thread) + retry 2 ครั้ง; ส่งไม่สำเร็จ log ใน `rdpguard.log`
 >
 > หาก Telegram ขึ้น `CERTIFICATE_VERIFY_FAILED` ให้ปิด `telegram_verify_ssl` (หรือเอาเครื่องหมายติ๊ก **ตรวจสอบ SSL ของ Telegram** ใน Web UI) แล้วบันทึกค่า — ใช้เฉพาะเมื่อมี proxy/โปรแกรมกันไวรัส intercept HTTPS และควรใช้กับเครือข่ายที่เชื่อถือได้
 

@@ -50,6 +50,18 @@
 - มีปุ่มส่งข้อความทดสอบ
 - แสดงผลการส่งล่าสุดและสถานะการตั้งค่า
 - รองรับการปิด SSL verification สำหรับ Telegram/Webhook เมื่อมี HTTPS interception
+- ทุกข้อความระบุ `[ชื่อเครื่อง]` — ตั้งชื่อเครื่องเองได้ (ว่าง = ชื่อเครื่องระบบ) เหมาะกับเฝ้าหลายเครื่อง
+
+## ควบคุมผ่าน Telegram (Telegram Command)
+
+- รับคำสั่งควบคุม RDPGuard ผ่าน Bot API แบบ long-polling ไม่ต้องเปิดพอร์ต/HTTPS
+- รองรับ `/status`, `/where`, `/block`, `/unblock`, `/unblock-all`, `/allow`, `/blacklist`, `/whitelist`, `/list`, `/events`, `/log`, `/ping` และ `/help`
+- รับคำสั่งจาก `telegram_chat_id` ที่ตั้งไว้เท่านั้น
+- จำกัดคำสั่งต่อนาทีต่อแชท
+- `/unblock-all` ต้องยืนยัน `/confirm` ภายในเวลาที่กำหนด
+- บันทึกทุกคำสั่งลง Audit Log (actor = `telegram:<chat_id>`)
+- ตรวจสอบสถานะได้จากหน้า ตั้งค่า และ `GET /api/telegram/status`
+- **ใช้หลายเครื่องกับ bot เดียวได้** — ทุกคำตอบขึ้นต้นด้วย `[ชื่อเครื่อง]`, สั่งเครื่องเป้าหมายด้วย `@ชื่อเครื่อง` ต่อท้ายคำสั่ง (`/status @srv-a`), และมี `/where` ดูชื่อเครื่อง
 
 ## Web UI
 

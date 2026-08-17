@@ -1082,6 +1082,7 @@ const SETTINGS_UI = {
     fields: [
       { key: "enable", label: "เปิดการแจ้งเตือนเมื่อบล็อก IP", type: "bool" },
       { key: "channel", label: "ช่องทางที่ใช้", type: "select", options: [{ v: "both", l: "ทั้งสองช่องทาง" }, { v: "telegram", l: "Telegram เท่านั้น" }, { v: "email", l: "Email เท่านั้น" }] },
+      { key: "hostname", label: "ชื่อเครื่อง (ว่าง = ชื่อเครื่องระบบ — ใช้ระบุเป้าในคำสั่ง Telegram เช่น /status @ชื่อเครื่อง)", type: "text" },
       { key: "telegram_bot_token", label: "Telegram: Bot Token (จาก @BotFather)", type: "secret" },
       { key: "telegram_chat_id", label: "Telegram: Chat ID", type: "secret" },
       { key: "telegram_verify_ssl", label: "ตรวจสอบ SSL ของ Telegram (ปิดถ้า proxy/กันไวรัส intercept HTTPS แล้วขึ้น CERTIFICATE_VERIFY_FAILED)", type: "bool" },
@@ -1094,6 +1095,10 @@ const SETTINGS_UI = {
       { key: "webhook_enable", label: "เปิด Webhook เสริม", type: "bool" },
       { key: "webhook_url", label: "Webhook URL", type: "secret" },
       { key: "webhook_verify_ssl", label: "ตรวจสอบ SSL ของ Webhook", type: "bool" },
+      { key: "enable_commands", label: "เปิดรับคำสั่งจาก Telegram (Telegram Command)", type: "bool" },
+      { key: "confirm_timeout_seconds", label: "หมดเวลายืนยันคำสั่งอันตราย (วินาที)", type: "int" },
+      { key: "rate_limit_per_minute", label: "จำกัดคำสั่งต่อนาที", type: "int" },
+      { key: "_telegram_cmd_status", label: "สถานะ Telegram Command", type: "tg_status" },
       { key: "_notify_test", label: "ทดสอบการแจ้งเตือน", type: "notify_test" },
       { key: "_notify_status", label: "สถานะการแจ้งเตือน", type: "notify_status" },
     ],
@@ -1268,6 +1273,23 @@ async function refreshSettings() {
           box.appendChild(btn);
           box.appendChild(msg);
           field.appendChild(box);
+        } else if (f.type === "tg_status") {
+          field.innerHTML = `<label>${f.label}<span class="gen-hint">คำสั่ง: /status /block /unblock /unblock-all /allow /blacklist /whitelist /list /events /log /ping /help</span></label>`;
+          const node = document.createElement("span");
+          node.className = "notify-status";
+          node.dataset.tgStatus = "1";
+          node.textContent = "กำลังโหลด...";
+          field.appendChild(node);
+          api("/api/telegram/status").then(({ data }) => {
+            if (!node.isConnected) return;
+            const parts = [data.enabled ? "เปิด" : "ปิด"];
+            if (data.enabled) parts.push(data.running ? "polling ทำงาน" : "polling หยุด");
+            if (data.last_command) parts.push("ล่าสุด: " + data.last_command + (data.last_result ? " → " + data.last_result.slice(0, 60) : ""));
+            node.textContent = parts.join(" · ");
+            node.className = "notify-status " + (data.enabled && data.running ? "ok" : "warn");
+          }).catch(() => {
+            if (node.isConnected) { node.textContent = "ตรวจสอบสถานะไม่ได้"; node.className = "notify-status warn"; }
+          });
         } else if (f.type === "notify_status") {
           field.innerHTML = `<label>${f.label}</label><span class="notify-status" data-notify-status>กำลังโหลด...</span>`;
           api("/api/notify/status").then(({ data: status }) => {

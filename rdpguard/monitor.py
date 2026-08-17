@@ -24,6 +24,7 @@ class Monitor:
         self._apply_fw_config()
         self.notifier = None
         self._init_notifier()
+        self.tg = None
         self.detector = BruteForceDetector(self.db, self.fw, cfg=self.cfg, on_block=self._on_block)
         self._engines = []
         self._stop = threading.Event()
@@ -57,12 +58,18 @@ class Monitor:
         self._apply_fw_config()
         if self.notifier:
             self.notifier.reload(self.cfg)
+        if config_mod.get_bool(self.cfg, "notify", "enable_commands", False):
+            if not (self.tg and self.tg.running()):
+                self._start_tg()
+        elif self.tg:
+            self.tg.stop()
         self._restart_engines()
         log.info("โหลด config ใหม่เรียบร้อย")
 
     def start(self):
         self.running = True
         self._start_engines()
+        self._start_tg()
         self._cleaner = threading.Thread(target=self._cleanup_loop, daemon=True)
         self._cleaner.start()
         log.info("RDPGuard monitor เริ่มทำงาน")
@@ -70,10 +77,24 @@ class Monitor:
     def stop(self):
         self.running = False
         self._stop_engines()
+        if self.tg:
+            self.tg.stop()
         self._stop.set()
         if self._cleaner:
             self._cleaner.join(timeout=10)
         log.info("RDPGuard monitor หยุดทำงาน")
+
+    def _start_tg(self):
+        if not config_mod.get_bool(self.cfg, "notify", "enable_commands", False):
+            return
+        if not (self.notifier and self.notifier.configured()):
+            log.warning("Telegram Command เปิดอยู่ แต่ Telegram ยังไม่ได้ตั้งค่า")
+            return
+        if not self.tg:
+            from .tgcmd import TelegramCommandBot
+
+            self.tg = TelegramCommandBot(self, cfg=self.cfg, notifier=self.notifier)
+        self.tg.start()
 
     def _start_engines(self):
         poll = config_mod.get_int(self.cfg, "monitor", "poll_interval_seconds", 2)

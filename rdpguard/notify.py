@@ -120,6 +120,12 @@ class Notifier:
             return
         self._q.put({"ip": ip, "source": source, "reason": reason, "expires": expires})
 
+    def send_reply(self, text):
+        """ส่งข้อความตอบกลับจาก Telegram Command — ต้องตั้งค่า Telegram แล้ว"""
+        if not (self._get("telegram_bot_token").strip() and self._get("telegram_chat_id").strip()):
+            return False, "Telegram ไม่ได้ตั้งค่า"
+        return self._send_telegram(str(text))
+
     def test(self):
         """ส่งข้อความทดสอบตามช่องทางที่เลือก — คืนรายงาน {telegram, email}"""
         from . import config as config_mod
@@ -127,7 +133,8 @@ class Notifier:
         results = {}
         channels = self._channels()
         now = time.strftime("%Y-%m-%d %H:%M:%S")
-        body = f"RDPGuard v{_version()} — ข้อความทดสอบจากระบบแจ้งเตือน ({now})"
+        host = config_mod.machine_name(self._cfg())
+        body = f"[{host}] RDPGuard v{_version()} — ข้อความทดสอบจากระบบแจ้งเตือน ({now})"
         if "telegram" in channels:
             if self._get("telegram_bot_token").strip() and self._get("telegram_chat_id").strip():
                 ok, err = self._send_telegram(body)
@@ -196,6 +203,7 @@ class Notifier:
         else:
             lines = [_format_block(b, numbered=True, idx=i + 1) for i, b in enumerate(batch)]
             text = f"RDPGuard: บล็อก IP รวม {len(batch)} รายการ\n\n" + "\n".join(lines)
+        text = f"[{config_mod.machine_name(self._cfg())}] {text}"
         channels = self._channels()
         ok_tg = ok_mail = True
         err_tg = err_mail = ""
