@@ -10,9 +10,11 @@
 import json
 import logging
 import os
+import random
 import ssl
 import threading
 import time
+import urllib.error
 import urllib.request
 
 log = logging.getLogger("RDPGuard.tgcmd")
@@ -119,21 +121,59 @@ class TelegramCommandBot:
             log.debug("deleteWebhook ไม่สำเร็จ", exc_info=True)
         while not self._stop.wait(0):
             try:
-                result = self._call("getUpdates", {"offset": self._offset, "timeout": 25})
-                if not result.get("ok"):
-                    time.sleep(5)
+                # staggered polling (หลายเครื่อง / bot เดียว): เช็คสิทธิ์ด้วย timeout
+                # สั้นก่อน — ถ้าอีกเครื่องถือสิทธิ์รับคำสั่งอยู่ (HTTP 409) จะได้รู้ไว
+                # แล้วรอสุ่มช่วง config เพื่อเปิดโอกาสให้อีกเครื่องรับคำสั่งบ้าง
+                result = self._call("getUpdates", {"offset": self._offset, "timeout": 1})
+            except urllib.error.HTTPError as exc:
+                if exc.code == 409:
+                    wait = self._conflict_wait()
+                    log.info("Telegram Command bot ถูกใช้ที่อื่น (409) — ลองใหม่ใน %.0f วิ", wait)
+                    time.sleep(wait)
                     continue
-                for update in result.get("result", []):
-                    self._offset = max(self._offset, int(update.get("update_id", 0)) + 1)
-                    message = update.get("message") or {}
-                    text = str(message.get("text") or "").strip()
-                    chat = message.get("chat") or {}
-                    chat_id = str(chat.get("id") or "")
-                    if text.startswith("/"):
-                        self._handle_command(chat_id, text)
+                log.warning("Telegram Command polling error: %s", exc)
+                time.sleep(5)
+                continue
             except Exception as exc:
                 log.warning("Telegram Command polling error: %s", exc)
                 time.sleep(5)
+                continue
+            if not result.get("ok"):
+                time.sleep(5)
+                continue
+            self._drain_updates(result)
+            # ได้สิทธิ์แล้ว — รับคำสั่งแบบ timeout ยาว จนกว่าจะโดนแย่ง/error
+            try:
+                result = self._call("getUpdates", {"offset": self._offset, "timeout": 25})
+                if result.get("ok"):
+                    self._drain_updates(result)
+            except urllib.error.HTTPError as exc:
+                if exc.code == 409:
+                    wait = self._conflict_wait()
+                    log.info("Telegram Command bot ถูกใช้ที่อื่น (409) — ลองใหม่ใน %.0f วิ", wait)
+                    time.sleep(wait)
+            except Exception as exc:
+                log.warning("Telegram Command polling error: %s", exc)
+                time.sleep(5)
+
+    def _drain_updates(self, result):
+        """ประมวลผลอัปเดตที่ได้จาก getUpdates — ขยับ offset และรับคำสั่ง"""
+        for update in result.get("result", []):
+            self._offset = max(self._offset, int(update.get("update_id", 0)) + 1)
+            message = update.get("message") or {}
+            text = str(message.get("text") or "").strip()
+            chat = message.get("chat") or {}
+            chat_id = str(chat.get("id") or "")
+            if text.startswith("/"):
+                self._handle_command(chat_id, text)
+
+    def _conflict_wait(self):
+        """รอสุ่มระหว่าง poll_retry_min/max_seconds ก่อนลอง poll ใหม่หลังเจอ 409"""
+        from . import config as config_mod
+
+        low = max(1, config_mod.get_int(self._config(), "notify", "poll_retry_min_seconds", 15))
+        high = max(low, config_mod.get_int(self._config(), "notify", "poll_retry_max_seconds", 45))
+        return random.uniform(low, high)
 
     # ---- auth / rate / confirm ----
 

@@ -1098,6 +1098,8 @@ const SETTINGS_UI = {
       { key: "enable_commands", label: "เปิดรับคำสั่งจาก Telegram (Telegram Command)", type: "bool" },
       { key: "confirm_timeout_seconds", label: "หมดเวลายืนยันคำสั่งอันตราย (วินาที)", type: "int" },
       { key: "rate_limit_per_minute", label: "จำกัดคำสั่งต่อนาที", type: "int" },
+      { key: "poll_retry_min_seconds", label: "รอขั้นต่ำเมื่อ bot ติด 409 (หลายเครื่อง — วินาที)", type: "int" },
+      { key: "poll_retry_max_seconds", label: "รอขั้นสูงเมื่อ bot ติด 409 (หลายเครื่อง — วินาที)", type: "int" },
       { key: "_telegram_cmd_status", label: "สถานะ Telegram Command", type: "tg_status" },
       { key: "_notify_test", label: "ทดสอบการแจ้งเตือน", type: "notify_test" },
       { key: "_notify_status", label: "สถานะการแจ้งเตือน", type: "notify_status" },

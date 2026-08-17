@@ -98,6 +98,8 @@ _INT_RANGES = {
     ("notify", "cooldown_seconds"): (0, 86400),
     ("notify", "confirm_timeout_seconds"): (5, 3600),
     ("notify", "rate_limit_per_minute"): (1, 600),
+    ("notify", "poll_retry_min_seconds"): (1, 3600),
+    ("notify", "poll_retry_max_seconds"): (1, 3600),
 }
 
 
@@ -1289,6 +1291,8 @@ class RDPGuardHandler(BaseHTTPRequestHandler):
                 "enable_commands",
                 "confirm_timeout_seconds",
                 "rate_limit_per_minute",
+                "poll_retry_min_seconds",
+                "poll_retry_max_seconds",
             },
         }
         if not isinstance(body, dict):

@@ -223,6 +223,12 @@ enable_commands = false
 confirm_timeout_seconds = 60
 ; จำกัดคำสั่งต่อนาทีต่อแชท
 rate_limit_per_minute = 10
+; --- หลายเครื่อง / bot เดียว (staggered polling) ---
+; หลายเครื่องใช้ bot เดียวกันจะ poll สลับกันได้เอง: เครื่องที่เจอ 409 Conflict
+; (อีกเครื่องถือสิทธิ์รับคำสั่งอยู่) จะรอสุ่มระหว่าง min-max วินาที แล้วลองใหม่
+; ยิ่งค่าน้อย ยิ่งสลับเจ้าของบ่อย (คำสั่งตกถึงเครื่องเป้าหมายไว) แต่ request มากขึ้น
+poll_retry_min_seconds = 15
+poll_retry_max_seconds = 45
 """
 
 

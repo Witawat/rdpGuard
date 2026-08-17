@@ -59,6 +59,7 @@ build.bat build              # ดาวน์โหลด UPX/ติดตั�
 - v1.7.0: Events/Blocked/Audit มีตัวกรองและ CSV export · DB มี retention · Backup ล้างค่าลับ · Webhook เป็นช่องทางเสริม
 - v1.8.0: Telegram Command ควบคุม RDPGuard ผ่าน Bot API — ตรวจ chat_id/rate limit/confirm + Audit ทุกคำสั่ง
 - v1.9.0: ข้อความแจ้งเตือน/คำตอบทุกแบบขึ้นต้น `[ชื่อเครื่อง]` (`[notify] hostname` ว่าง = ชื่อเครื่องระบบ) — หลายเครื่องกับ bot เดียว: สั่งเป้าด้วย `@ชื่อเครื่อง` ต่อท้ายคำสั่ง (เครื่องไม่ตรงชื่อตอบปฏิเสธ ไม่ execute), `/where` ดูชื่อเครื่อง; hostname ห้ามมีช่องว่าง/@ (validation ใน webui.py)
+- v1.9.1: หลายเครื่อง/bot เดียว ใช้ staggered polling — poll เช็คสิทธิ์ timeout=1 วิ; เจอ HTTP 409 รอสุ่ม `poll_retry_min/max_seconds` (15–45) แล้วลองใหม่ — ทุกเครื่องผลัดกันเป็นเจ้าของรับคำสั่ง (Telegram รับแค่ 1 consumer ต่อ bot ณ ขณะหนึ่ง)
 
 ## แผนพัฒนา (ถัดไป)
 
