@@ -65,7 +65,7 @@ python run.py password    :: ดูรหัสผ่าน Web UI
 - service ใช้ `pythonw.exe` (ไม่มีหน้าต่าง) + script `run.py`
 - config/ฐานข้อมูล/log อยู่ที่ `%ProgramData%\RDPGuard\` (โหมด source) — สร้างให้อัตโนมัติตอนรันครั้งแรก
 
-> โหมด exe (`dist\rdpguard.exe`): config/ฐานข้อมูล/log จะอยู่**โฟลเดอร์เดียวกับ exe** แทน
+> โหมด exe (`dist\rdpguard.exe`): config/ฐานข้อมูล/log จะอยู่**โฟลเดอร์เดียวกับ exe ถ้าเขียนได้** แทน; ถ้าโฟลเดอร์ exe ป้องกันการเขียน ระบบจะใช้ data directory สำรองตาม [CONFIG.md](CONFIG.md)
 > และถ้ามีข้อมูลเก่าอยู่ที่ `%ProgramData%\RDPGuard\` (จากโหมด source/เวอร์ชันก่อนหน้า)
 > จะย้ายมาให้อัตโนมัติในรันครั้งแรก
 
@@ -76,12 +76,23 @@ python run.py password    :: ดูรหัสผ่าน Web UI
 ## 5. สร้าง exe (ไม่ต้องลง Python บนเครื่องเป้าหมาย)
 
 ```bat
-build.bat
+build.bat build
 ```
 
-- ติดตั้ง PyInstaller ให้เอง แล้ว build เป็น **ไฟล์เดียว** `dist\rdpguard.exe` (มี icon ฝังอยู่แล้ว)
+- ติดตั้ง PyInstaller และดาวน์โหลด UPX ให้อัตโนมัติ แล้ว build เป็น **ไฟล์เดียว** `dist\rdpguard.exe` (มี icon ฝังอยู่แล้ว)
+- ถ้าเรียก `build.bat` โดยไม่ใส่ argument จะมีเมนูให้เลือก build อย่างเดียว หรือ build แล้วติดตั้ง service ต่อทันที; ใช้ `build.bat install` เพื่อเลือกโหมดหลัง build แบบไม่โต้ตอบ
 - หลัง build เสร็จ `install.bat` / `uninstall.bat` จะใช้ exe อัตโนมัติ
-- เอาแค่ไฟล์ `dist\rdpguard.exe` ไปเครื่องอื่นได้เลย (ไม่ได้สร้าง folder หลายชั้น) แล้วรัน `rdpguard.exe install / start`
+- เอาแค่ไฟล์ `dist\rdpguard.exe` ไปเครื่องอื่นได้เลย (ไม่ได้สร้าง folder หลายชั้น) แล้วรัน `rdpguard.exe install` ตามด้วย `rdpguard.exe start`
+
+> โปรแกรมกันไวรัสบางตัวอาจฟลากไฟล์ที่สร้างด้วย PyInstaller + UPX เนื่องจากเป็น packed executable — ตรวจสอบไฟล์จากแหล่งที่เชื่อถือได้ก่อน แล้วเพิ่ม exclusion ให้โฟลเดอร์ที่เก็บ exe หากจำเป็น
+
+### อัปเดต exe เดิม
+
+1. หยุด RDPGuard หรือ Windows Service เดิมก่อน
+2. สำรอง `config.ini` และ `rdpguard.db` ถ้าต้องการ
+3. แทนที่ `rdpguard.exe` ด้วยไฟล์ใหม่ แล้วเริ่มโปรแกรม/service อีกครั้ง
+
+ไฟล์ข้อมูลไม่ถูกลบระหว่างการอัปเดต และ exe จะใช้ข้อมูลที่อยู่ข้าง exe เป็นหลัก
 
 ## 6. ถอนการติดตั้ง
 
@@ -90,7 +101,7 @@ uninstall.bat
 ```
 หรือ: `python run.py stop` → `python run.py remove`
 
-ข้อมูลใน `%ProgramData%\RDPGuard\` (config, ฐานข้อมูล, log) จะไม่ถูกลบ — ลบโฟลเดอร์ทิ้งเองถ้าต้องการล้างทั้งหมด
+ข้อมูลในโฟลเดอร์ข้อมูลของโหมดที่ใช้งาน (config, ฐานข้อมูล, log และไฟล์สำรอง log) จะไม่ถูกลบ — ลบโฟลเดอร์ทิ้งเองถ้าต้องการล้างทั้งหมด
 
 ## 7. ตรวจสอบหลังติดตั้ง
 
@@ -102,5 +113,5 @@ python run.py status
 ถ้า service ติดตั้งแล้วแต่สถานะไม่ใช่ running:
 
 1. เปิด `services.msc` → หา **RDPGuard Service** → อ่านข้อความ error
-2. ดู log: `%ProgramData%\RDPGuard\rdpguard.log`
+2. ดู log: ตรวจตำแหน่งจาก Web UI พาเนล **Log การทำงาน** หรือ `%ProgramData%\RDPGuard\rdpguard.log` ในโหมด source
 3. สาเหตุพบบ่อย: ติดตั้ง Python แบบ "just for me" (service มองไม่เห็น user profile) → ติดตั้ง Python แบบ **All Users** ใหม่ หรือใช้ exe build แทน

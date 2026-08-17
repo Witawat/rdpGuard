@@ -1,21 +1,15 @@
 # การตั้งค่า (Config)
 
 config เก็บที่:
-- **โหมด exe**: โฟลเดอร์เดียวกับ `rdpguard.exe` (เช่น `C:\tools\rdpguard\config.ini`)
+- **โหมด exe**: โฟลเดอร์เดียวกับ `rdpguard.exe` ถ้าเขียนได้ (เช่น `C:\tools\rdpguard\config.ini`); ถ้าไม่ได้จะ fallback ไป `%ProgramData%\RDPGuard\` หรือ `~/.rdpguard`
 - **โหมด source**: `%ProgramData%\RDPGuard\config.ini` (ถ้าเขียนไม่ได้ → `~/.rdpguard\`)
 
-สร้างอัตโนมัติตอนรันครั้งแรก แก้ไขผ่าน Web UI (หน้า "ตั้งค่า") หรือแก้ไฟล์ตรง ๆ แล้วระบบจะโหลดใหม่ทันที โดยไม่ต้อง restart service
+สร้างอัตโนมัติตอนรันครั้งแรก แก้ไขผ่าน Web UI (หน้า "ตั้งค่า") หรือแก้ไฟล์ตรง ๆ ได้
 
-ตัวอย่างเต็ม: [config.example.ini](../config.example.ini)
+- ค่าการเฝ้าระวัง/ตรวจจับ/firewall/engine/แจ้งเตือนโหลดใหม่ทันทีหลังบันทึกผ่าน Web UI
+- `webui.host`/`webui.port` และค่าการ logging ใน `[general]` ต้อง restart โปรแกรม/service จึงจะมีผล
 
-## [general]
-
-| คีย์ | ค่าเริ่มต้น | ความหมาย |
-|---|---|---|
-| `log_level` | `INFO` | ระดับ log: `DEBUG` / `INFO` / `WARNING` / `ERROR` |
-| `setup_done` | `false` | ผ่าน Setup Wizard ครั้งแรกแล้วหรือยัง (ระบบจัดการเอง — ไม่ต้องแก้ด้วยมือ) |
-
-> config.ini จะถูกเติม section/คีย์ที่ยังไม่มีด้วยค่าเริ่มต้นให้อัตโนมัติตอนรัน (ทุกค่าเริ่มต้นเห็นในไฟล์ config ได้) — ค่าที่ตั้งไว้แล้วจะไม่ถูกทับ
+ตัวอย่างเต็ม: [config.example.ini](config.example.ini)
 
 ## [general]
 
@@ -24,9 +18,12 @@ config เก็บที่:
 | `log_level` | `INFO` | ระดับ log: `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 | `log_max_mb` | `5` | ขนาดไฟล์ log สูงสุดต่อไฟล์ (MB) — เกินแล้วหมุนเป็น `rdpguard.log.1`, `.2`, ... |
 | `log_backups` | `5` | เก็บไฟล์ log หมุนเวียนกี่ไฟล์ (รวมไฟล์ปัจจุบัน = 6 ไฟล์) |
-| `setup_done` | `false` | ตั้งค่าเสร็จแล้วหรือยัง (ระบบจัดการเอง) |
+| `setup_done` | `false` | ผ่าน Setup Wizard ครั้งแรกแล้วหรือยัง (ระบบจัดการเอง — ไม่ต้องแก้ด้วยมือ) |
+
+> config.ini จะถูกเติม section/คีย์ที่ยังไม่มีด้วยค่าเริ่มต้นให้อัตโนมัติตอนรัน (ทุกค่าเริ่มต้นเห็นในไฟล์ config ได้) — ค่าที่ตั้งไว้แล้วจะไม่ถูกทับ
 
 > ไฟล์ log เก่า/ใหญ่: ลบ `rdpguard.log.*` ข้าง exe (หรือ `%ProgramData%\RDPGuard`) ทิ้งได้เลยตอนโปรแกรมปิด — ระบบสร้างใหม่ให้เอง
+> ค่า `log_level`, `log_max_mb` และ `log_backups` ยังปรับจากหน้า Web UI ไม่ได้ ต้องแก้ใน `config.ini` แล้ว restart โปรแกรม/service; ค่าเริ่มต้น 5 MB × (ไฟล์ปัจจุบัน + สำรอง 5 ไฟล์) จึงใช้พื้นที่ประมาณไม่เกิน 30 MB
 
 ## [monitor]
 
@@ -117,6 +114,8 @@ Engine เพิ่มเติม (engine RDP/Security เปิดถาวร
 | `cooldown_seconds` | `60` | ส่งอย่างน้อยทุกกี่วินาที — ข้อความระหว่างนั้นรวมเป็นชุดเดียว (`0` = ส่งทันทีทุกครั้ง; กันสแปมตอนโจมตีหนัก) |
 
 > ข้อความแจ้งเตือน: `บล็อก IP <ip> (<engine>) — <เหตุผล> — หมดอายุ <เวลา>` — ส่งแบบไม่บล็อก (worker thread) + retry 2 ครั้ง; ส่งไม่สำเร็จ log ใน `rdpguard.log`
+>
+> หาก Telegram ขึ้น `CERTIFICATE_VERIFY_FAILED` ให้ปิด `telegram_verify_ssl` (หรือเอาเครื่องหมายติ๊ก **ตรวจสอบ SSL ของ Telegram** ใน Web UI) แล้วบันทึกค่า — ใช้เฉพาะเมื่อมี proxy/โปรแกรมกันไวรัส intercept HTTPS และควรใช้กับเครือข่ายที่เชื่อถือได้
 
 ## ค่าที่แนะนำตามสถานการณ์
 

@@ -39,7 +39,9 @@ Mood: "ผู้ดูแลเซิร์ฟเวอร์เปิดหน�
 - **พาเนล "เหตุการณ์ล่าสุด"**: ตาราง (เวลา/IP/ผู้ใช้/โดเมน/LogonType/ประเภท) scroll ในพาเนล 420px, badge สีแยก fail/success/ntlm
 - **พาเนล "IP ที่ถูกบล็อก"**: แถวเพิ่ม IP + ตารางพร้อมปุ่มปลดบล็อก (อันตราย = ปุ่มแดง)
 - **Whitelist / Blacklist**: สองพาเนลคู่กัน
-- **ตั้งค่า**: ฟอร์มกลุ่มตาม section (เฝ้าระวัง/ตรวจจับ/firewall/web UI) ปุ่มบันทึก 1 จุด
+- **ตั้งค่า**: ฟอร์มกลุ่มตาม section (เฝ้าระวัง/ตรวจจับ/firewall/web UI/engine เพิ่มเติม/แจ้งเตือน) ปุ่มบันทึก 1 จุด
+- **Log การทำงาน**: แสดง path/ขนาดไฟล์, เลือกจำนวนบรรทัด 250/500/1000 และ refresh ทุก 5 วินาที
+- **Session / Remote**: แสดง session ปัจจุบัน refresh ทุก 10 วินาที; ใช้ `qwinsta`/`query session` และ fallback WTS API โดยไม่เรียก PowerShell
 - **Toast**: ด้านล่างขวา fixed (ผลบันทึก/error) เข้าด้วย fade + translateY 8px
 - **Login**: กล่องกลางจอ 340px พร้อมข้อความ error แดง
 
@@ -50,4 +52,4 @@ Mood: "ผู้ดูแลเซิร์ฟเวอร์เปิดหน�
 - motion เฉพาะ transition ≤120ms + toast; `prefers-reduced-motion: reduce` → ทุกอย่าง instant
 - z-index: header 10 / toast 40
 - ปุ่ม: primary = พื้นน้ำเงิน+ตัวขาว / secondary = พื้นขาว+ขอบ / ปุ่มอันตราย = ตัวแดง
-- respawnive: การ์ดเป็น grid auto-fit, สองคอลัมน์ (whitelist/blacklist) ย่อเป็น 1 คอลัมน์เมื่อจอแคบ
+- responsive: การ์ดเป็น grid auto-fit, สองคอลัมน์ (whitelist/blacklist) ย่อเป็น 1 คอลัมน์เมื่อจอแคบ; กลุ่มตั้งค่าจะเรียงเป็นคอลัมน์เดียวเมื่อจอกว้างน้อยกว่า 980px

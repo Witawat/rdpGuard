@@ -66,6 +66,10 @@ python run.py password
 - ต้องเปิดโปรแกรมด้วย **Run as administrator** ถึงจะใช้ปุ่มได้
 - รันใน service อยู่ → ควบคุมผ่าน services.msc หรือ CLI (`rdpguard.exe stop` ฯลฯ) เท่านั้น
 
+### Session / Remote ที่ใช้งานอยู่
+
+ตารางแสดง session RDP/console/network ปัจจุบัน (refresh ทุก 10 วินาที) โดยพยายามใช้ `qwinsta`/`query session` และ fallback เป็น WTS API (`win32ts`) ใน process เดียวกัน — ไม่ใช้ PowerShell จึงไม่ขึ้นกับการมีคำสั่งภายนอกและหลีกเลี่ยงการถูกโปรแกรมกันไวรัสฟลาก
+
 ### เหตุการณ์ล่าสุด
 
 ตารางแสดง failed/success logon ล่าสุด 80 รายการ: เวลา (UTC), IP, ผู้ใช้, โดเมน, LogonType, **แหล่ง** (RDP/OpenSSH/MSSQL/IIS Web/MySQL — รู้ว่าโจมตีผ่านช่องทางไหน), ประเภท (ล้มเหลว/สำเร็จ/NTLM)
@@ -87,7 +91,11 @@ python run.py password
 
 ### Log การทำงาน
 
-พาเนลด้านล่างสุด แสดง `rdpguard.log` ล่าสุด 250 บรรทัด (refresh อัตโนมัติทุก 5 วินาที + ปุ่ม "โหลดใหม่") — ใช้ดูว่า engine ทำงานปกติ/เจอเหตุการณ์อะไรบ้าง
+พาเนลด้านล่างสุดแสดง `rdpguard.log` ล่าสุด โดยเลือกได้ **250 / 500 / 1000 บรรทัด** (refresh อัตโนมัติทุก 5 วินาที + ปุ่ม "โหลดใหม่") พร้อมแสดง path และขนาดไฟล์
+
+- ระบบอ่านเฉพาะ 64 KB ท้ายสุดของไฟล์ต่อ request จึงไม่โหลด log ทั้งไฟล์เข้าหน่วยความจำ
+- ไฟล์ log หมุนอัตโนมัติเมื่อถึง `[general] log_max_mb` (ค่าเริ่มต้น 5 MB) และเก็บไฟล์เก่าตาม `[general] log_backups` (ค่าเริ่มต้น 5 ไฟล์)
+- ไฟล์ปัจจุบันและไฟล์สำรองใช้ชื่อ `rdpguard.log`, `rdpguard.log.1`, ... — ลบไฟล์สำรองได้เมื่อหยุดโปรแกรมแล้ว
 
 ### Whitelist / Blacklist
 
@@ -98,17 +106,22 @@ python run.py password
 
 ### ตั้งค่า
 
-เปลี่ยนค่าการเฝ้าระวัง/ตรวจจับ/firewall/web UI ได้จากหน้าเว็บ กด **บันทึกการตั้งค่า** แล้วมีผลทันที (service โหลด config ใหม่เอง โดยไม่ต้อง restart)
+เปลี่ยนค่าการเฝ้าระวัง/ตรวจจับ/firewall/engine/แจ้งเตือน/Web UI ได้จากหน้าเว็บ กด **บันทึกการตั้งค่า** แล้วมีผลทันที โดย service/monitor โหลด config ใหม่เอง
+
+- การเปลี่ยน `webui.host` หรือ `webui.port` ต้อง restart โปรแกรม/service เพราะเป็นค่าที่ใช้ตอนเปิด HTTP server
+- ค่าใน `[general]` โดยเฉพาะ `log_level`, `log_max_mb`, `log_backups` ต้องแก้ใน `config.ini` และ restart เพื่อให้ logging handler ใช้ค่าใหม่
 
 > ตั้งค่า **Generic engine** (ไฟล์ log ของโปรแกรมอื่น + regex เอง เช่น MailEnable/SmarterMail/PBX) ดูตัวอย่างโปรแกรมจริงและวิธีทดสอบ regex ได้ที่ **[GENERIC.md](GENERIC.md)**
 
 ### แจ้งเตือน (Telegram / Email)
 
-เมื่อบล็อก IP ระบบส่งข้อความแจ้งเตือน — ตั้งค่าใน หน้า ตั้งค่า → "แจ้งเตือน (Telegram / Email)": เปิดสวิตช์ + ใส่ Bot Token/Chat ID (Telegram — สร้าง bot กับ @BotFather) และ/หรือ SMTP (อีเมล) แล้วกด **"ส่งข้อความทดสอบ"** ตรวจก่อนใช้จริง
+เมื่อบล็อก IP ระบบส่งข้อความแจ้งเตือน — ตั้งค่าในหน้า ตั้งค่า → "แจ้งเตือน (Telegram / Email)": เปิดสวิตช์ + ใส่ Bot Token/Chat ID (Telegram — สร้าง bot กับ @BotFather) และ/หรือ SMTP (อีเมล) แล้วกด **"ส่งข้อความทดสอบ"** ตรวจก่อนใช้จริง
 
 - ข้อความ: `บล็อก IP <ip> (RDP) — เหตุผล — หมดอายุ <เวลา>`
+- ช่องทางเลือกได้: `ทั้งสองช่องทาง`, `Telegram เท่านั้น` หรือ `Email เท่านั้น`
 - **cooldown 60 วิ** (ค่าเริ่มต้น): โจมตีหนัก ๆ ข้อความถูกรวมเป็นชุดเดียว ไม่สแปม (ตั้ง 0 = ส่งทันทีทุกครั้ง)
 - ส่งแบบ background — ไม่หน่วงการบล็อก; ถ้าส่งไม่สำเร็จ (network/ตั้งค่าผิด) ดู `rdpguard.log`
+- ถ้า Telegram ขึ้น `CERTIFICATE_VERIFY_FAILED` จาก proxy/โปรแกรมกันไวรัสที่ intercept HTTPS ให้ปิด **ตรวจสอบ SSL ของ Telegram** แล้วกดบันทึก; ค่านี้มีผลเฉพาะ Telegram
 
 ## CLI
 
@@ -124,6 +137,8 @@ python run.py password
 | `status` | ดูสถานะ service (installed? running?) | ไม่ |
 | `run` | รันแบบ foreground (monitor + web) — ใช้ทดสอบ/ดู log สด | แนะนำใช่ (จะบล็อก IP ได้) |
 | `web` | รันเฉพาะ Web UI โดยไม่เฝ้าระวัง — ใช้ทดสอบ UI | ไม่ |
+| `unblock-all` | ปลดบล็อกทุก IP ที่ RDPGuard จัดการ (ฉุกเฉิน) | ใช่ |
+| `allow <ip>` | เพิ่ม IP เข้า whitelist และปลดบล็อกทันที (ฉุกเฉิน) | ใช่ |
 
 ### Setup Wizard (ครั้งแรก)
 
@@ -194,12 +209,12 @@ RDPGuard มีกัน 3 ชั้นอัตโนมัติ: ไม่บ
 
 | โหมด | ตำแหน่ง (config.ini, rdpguard.db, rdpguard.log) |
 |---|---|
-| exe (`rdpguard.exe`) | โฟลเดอร์เดียวกับ exe |
+| exe (`rdpguard.exe`) | โฟลเดอร์เดียวกับ exe ถ้าเขียนได้; ถ้าไม่ได้ใช้ data directory สำรอง |
 | source (`python run.py`) | `%ProgramData%\RDPGuard\` (ถ้าเขียนไม่ได้ → `C:\Users\<user>\.rdpguard\`) |
 
 | ไฟล์ | ความหมาย |
 |---|---|
-| config.ini | ตั้งค่าทั้งหมด (แก้ผ่าน Web UI ได้) |
+| config.ini | ตั้งค่าทั้งหมด (ส่วนใหญ่แก้ผ่าน Web UI ได้; ค่า `[general]` ต้องแก้ไฟล์โดยตรง) |
 | rdpguard.db | SQLite: เหตุการณ์, blocked, whitelist, blacklist |
 | rdpguard.log | log การทำงาน |
 
@@ -210,5 +225,5 @@ RDPGuard มีกัน 3 ชั้นอัตโนมัติ: ไม่บ
 
 1. เปิด RDP ไปที่เครื่องตัวเอง (จากเครื่องอื่น) แล้วลองใส่รหัสผิด 5+ ครั้งภายใน 10 นาที
 2. เปิด Web UI → ควรเห็นเหตุการณ์ล้มเหลวสะสม และ IP นั้นโดนบล็อกอัตโนมัติ (การ์ด "IP กำลังถูกบล็อก" เพิ่มขึ้น)
-3. ลองรัน `python run.py status` + `wf.msc` → ดู rule ชื่อ `RDPGuard Block <IP>`
+3. ลองรัน `python run.py status` + `wf.msc` → ค่าเริ่มต้นดู rule ชื่อ `RDPGuard Block` (single rule); ถ้าตั้ง `single_rule = false` จะเห็น rule แยกตาม IP
 4. ปลดบล็อกได้จากปุ่มใน Web UI หรือ `python run.py unblock <IP>`

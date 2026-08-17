@@ -6,7 +6,7 @@ RDP brute-force protection สำหรับ Windows Server / Windows Desktop �
 
 | รายการ | ค่า |
 |---|---|
-| เวอร์ชัน | 1.5.0 |
+| เวอร์ชัน | 1.6.3 |
 | ภาษา | Python 3.8+ |
 | Windows | source: 7 SP1 / 8.1 / 10 / 11 + Server 2008 R2 SP1 ขึ้นไป · exe (build ด้วย Python 3.11): 8.1 / 10 / 11 + Server 2012 ขึ้นไป (ดู INSTALL.md) |
 | Dependency | pywin32 อย่างเดียว (web UI ใช้ stdlib ล้วน) |
@@ -22,7 +22,7 @@ RDP brute-force protection สำหรับ Windows Server / Windows Desktop �
   - **MySQL** — MySQL error log
   - **Generic** — ไฟล์ log ของโปรแกรมอื่น (MailEnable/SmarterMail/PBX/SIP ฯลฯ) ตั้ง regex เองได้ — [คู่มือการใช้งานอย่างละเอียด (GENERIC.md)](GENERIC.md)
 - **นับความถี่ต่อ IP ต่อ engine** ภายในกรอบเวลา (ค่าเริ่มต้น 5 ครั้ง/10 นาที) — ตั้งขีดจำกัดแยกต่อ engine ได้
-- **บล็อก IP อัตโนมัติ** — เพิ่ม rule เข้า Windows Firewall (`RDPGuard Block <IP>`) ผ่าน HNetCfg COM API (fallback ด้วย netsh) — **จำกัดเฉพาะพอร์ตได้** (เช่น 3389,1433,22) หรือบล็อกทุกพอร์ต
+- **บล็อก IP อัตโนมัติ** — เพิ่ม IP เข้า Windows Firewall ผ่าน HNetCfg COM API (fallback ด้วย netsh) — ค่าเริ่มต้นใช้ rule เดียวชื่อ `RDPGuard Block` เก็บ IP ใน `RemoteAddresses` — **จำกัดเฉพาะพอร์ตได้** (เช่น 3389,1433,22) หรือบล็อกทุกพอร์ต
 - **หมดอายุแล้วปลดเอง** — บล็อกชั่วคราว (ค่าเริ่มต้น 24 ชม.) ปลดบล็อกอัตโนมัติเมื่อหมดเวลา
 - **ตัวนับสะสม (ยิงสั้น ๆ แล้วหนี)** — นับความล้มเหลวสะสมต่อ IP ภายในกรอบเวลายาว (ค่าเริ่มต้น 24 ชม.) — IP ที่ยิงทีละ 1-2 ครั้งไม่ถึงเกณฑ์ระยะสั้น แต่สะสมครบ (ค่าเริ่มต้น 8) โดนบล็อก (ค่าเริ่มต้น 6 ชม.) — ล็อกอินสำเร็จ = ล้างตัวนับให้อัตโนมัติ
 - **ต่ออายุอัตโนมัติ** — IP ที่ถูกบล็อกแล้วยังโจมตีต่อ จะต่ออายุบล็อกให้ใหม่
@@ -34,6 +34,9 @@ RDP brute-force protection สำหรับ Windows Server / Windows Desktop �
 - **กันบล็อกตัวเอง** — ข้าม loopback / IP เครื่องตัวเอง / วง LAN ส่วนตัว (เปิดปิดได้)
 - **CLI ครบ** — ติดตั้ง/ถอน/เริ่ม/หยุด service, บล็อก/ปลดบล็อก IP, ดูรีเซ็ตรหัสผ่าน
 - **Build เป็น exe ได้** — ใช้ PyInstaller (build.bat) ไม่ต้องลง Python บนเครื่องเป้าหมาย
+- **แจ้งเตือนเมื่อบล็อก IP** — Telegram และ/หรือ Email (SMTP) เลือกช่องทางได้ มี cooldown รวมข้อความและ retry แบบ background ไม่หน่วงการบล็อก
+- **จัดการ Log** — หมุนไฟล์อัตโนมัติ (ค่าเริ่มต้น 5 MB/ไฟล์ + เก็บสำรอง 5 ไฟล์), เลือกดู 250/500/1000 บรรทัด และแสดงขนาดไฟล์ใน Web UI
+- **ทำงานทนขึ้น** — กันรันซ้ำ, ป้องกัน CSRF, จำกัดการเดารหัสแยกต่อ IP, session sliding, SQLite WAL และจำกัดขนาด GeoIP cache
 
 ## เริ่มต้นเร็ว (Quick Start)
 
@@ -62,8 +65,9 @@ rdpGuard/
 │   ├── engines.py           # multi-engine (rdp/openssh/mssql/iis/mysql/generic)
 │   ├── detector.py          # ตรวจจับ brute-force + ตัดสินใจบล็อก
 │   ├── firewall.py          # Windows Firewall (COM + netsh fallback, จำกัดพอร์ตได้)
-│   ├── database.py          # SQLite (events, blocked, whitelist, blacklist)
+│   ├── database.py          # SQLite (events, blocked, accumulate, whitelist, blacklist, geoip)
 │   ├── config.py            # อ่าน/เขียน config.ini
+│   ├── notify.py            # แจ้งเตือน Telegram/Email แบบ worker thread
 │   ├── webui.py             # Web UI + REST API (stdlib http.server)
 │   └── web/                 # index.html, app.js, style.css (UI ภาษาไทย)
 ├── run.py                   # runner หลัก (entry ของ service + PyInstaller)
@@ -77,7 +81,7 @@ rdpGuard/
 └── requirements.txt         # pywin32
 ```
 
-ข้อมูล runtime (config.ini, rdpguard.db, rdpguard.log) เก็บไว้**ข้าง exe** (โหมด exe) หรือ `%ProgramData%\RDPGuard\` (โหมด source)
+ข้อมูล runtime (config.ini, rdpguard.db, rdpguard.log และไฟล์สำรอง log) เก็บไว้**ข้าง exe ถ้าเขียนได้** (โหมด exe) หรือ `%ProgramData%\RDPGuard\` (โหมด source; ถ้าเขียนไม่ได้ใช้ `~/.rdpguard`)
 
 ## เอกสารอื่น ๆ
 
@@ -86,12 +90,16 @@ rdpGuard/
 | [INSTALL.md](INSTALL.md) | ติดตั้งทีละขั้น (Python, service, exe build, รองรับ Windows เวอร์ชันไหนบ้าง) |
 | [USAGE.md](USAGE.md) | วิธีใช้ Web UI + CLI ทั้งหมด |
 | [CONFIG.md](CONFIG.md) | อธิบาย config ทุกค่าพร้อมค่าเริ่มต้น |
+| [GENERIC.md](GENERIC.md) | ตั้งค่า Generic log engine และเขียน regex |
 | [API.md](API.md) | REST API สำหรับนักพัฒนา |
 | [DESIGN.md](DESIGN.md) | design ของ Web UI |
 | [CHANGELOG.md](CHANGELOG.md) | ประวัติเวอร์ชัน |
+| [RELEASE_TEMPLATE.md](RELEASE_TEMPLATE.md) | รูปแบบ release notes สำหรับผู้ดูแลโปรเจกต์ |
 
 ## ข้อควรระวัง
 
 - การบล็อก IP ต้องใช้สิทธิ์ admin — service รันเป็น LocalSystem มีสิทธิ์อยู่แล้ว แต่ตอนรันแบบ `python run.py run` ต้องเปิด terminal ด้วย Run as administrator
 - Web UI ค่าเริ่มต้นเปิดเฉพาะ `127.0.0.1` — อย่าเปลี่ยนเป็น `0.0.0.0` โดยไม่ตั้งรหัสผ่าน (ดู [CONFIG.md](CONFIG.md))
+- exe ที่ build ด้วย PyInstaller + UPX อาจถูกโปรแกรมกันไวรัสฟลาก — เพิ่มโฟลเดอร์ที่เก็บ exe ใน exclusion หากตรวจสอบแล้วว่าเป็นไฟล์จากโปรเจกต์นี้
+- หาก Telegram ขึ้น `CERTIFICATE_VERIFY_FAILED` จาก proxy/โปรแกรมกันไวรัสที่ intercept HTTPS ให้ปิด **ตรวจสอบ SSL ของ Telegram** ในหน้า ตั้งค่า → แจ้งเตือน แล้วบันทึกค่า
 - ระบบนี้บล็อก IP ระดับ firewall — ถ้าต้องการกันการเดารหัสขั้นอีกชั้น แนะนำใช้ NLA (Network Level Authentication) ร่วมด้วย

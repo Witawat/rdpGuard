@@ -12,17 +12,18 @@ python run.py block <ip> [ชม.] / unblock <ip> / unblock-all / allow <ip>
 python run.py password       # ดู/รีเซ็ตรหัสผ่าน Web UI
 install.bat                  # ติดตั้ง Windows Service (ขอ admin เอง)
 python -m compileall -q rdpguard run.py   # ตรวจ syntax
-python -m PyInstaller --noconfirm rdpguard.spec   # build exe -> dist\rdpguard.exe
+build.bat build              # ดาวน์โหลด UPX/ติดตั้ง PyInstaller และ build exe -> dist\rdpguard.exe
 ```
 
 ## โครงสร้าง
 
 - `rdpguard/config.py` — config INI; `DEFAULT_CONFIG` คือต้นฉบับค่าเริ่มต้น; `ensure_config()` เติม section/คีย์ที่ขาดให้อัตโนมัติ
-- `rdpguard/database.py` — SQLite (events, blocked, blocked_history, whitelist, blacklist, geoip_cache)
+- `rdpguard/database.py` — SQLite (events, blocked, blocked_history, accumulate, whitelist, blacklist, geoip_cache)
 - `rdpguard/engines.py` — multi-engine: rdp (Security 4625/4624), openssh (Event 4), mssql (18456), iis (W3C), mysql, generic (regex)
 - `rdpguard/detector.py` — นับความถี่ต่อ (engine, IP), บล็อก, grace, escalation, auto-unblock
 - `rdpguard/firewall.py` — HNetCfg COM + netsh fallback; `single_rule=true` (ค่าเริ่มต้น) = rule เดียว `RDPGuard Block` เก็บ IP ใน RemoteAddresses
 - `rdpguard/monitor.py` — cleanup 60 วิ (หมดอายุ, whitelist reconcile, firewall reconcile)
+- `rdpguard/notify.py` — แจ้งเตือน Telegram/Email แบบ worker thread, cooldown, retry และเลือกช่องทาง
 - `rdpguard/webui.py` — web UI + REST API (stdlib http.server)
 - `rdpguard/web/` — UI ภาษาไทย (index.html / app.js / style.css)
 - `rdpguard/service.py` / `main.py` — Windows service / CLI
@@ -32,7 +33,7 @@ python -m PyInstaller --noconfirm rdpguard.spec   # build exe -> dist\rdpguard.e
 - **ภาษา**: docstring/UI/ข้อความ = ไทย · identifier/โค้ด = อังกฤษ
 - **dependency**: pywin32 ตัวเดียว — ห้ามเพิ่มโดยไม่จำเป็น (web UI เป็น stdlib ล้วน)
 - **bump เวอร์ชัน** ต้องทำครบ 3 จุด: `rdpguard/__init__.py` `__version__` + `?v=` ใน `rdpguard/web/index.html` + section ใหม่ใน `CHANGELOG.md`
-- **data dir**: exe mode = โฟลเดอร์เดียวกับ exe · source mode = `%ProgramData%\RDPGuard\`
+- **data dir**: exe mode = โฟลเดอร์เดียวกับ exe · source mode = `%ProgramData%\RDPGuard\` (ถ้าเขียนไม่ได้ใช้ `~/.rdpguard`)
 - **ห้าม commit**: `dist/config.ini`, `*.db`, `*.log`, `__pycache__` (gitignore แล้ว) — config/DB เป็นข้อมูลเฉพาะเครื่อง
 - **UI แก้ CSS/JS แล้วต้อง rebuild exe** (static ถูก bundle ใน exe) — และ asset version ต้อง bump ไม่งั้น cache เก่าค้าง
 - **release**: build exe → `gh release create <tag> --repo Witawat/rdpGuard --notes-file <ไฟล์> dist\rdpguard.exe` — แนบแค่ exe ตัวเดียว
@@ -51,10 +52,11 @@ python -m PyInstaller --noconfirm rdpguard.spec   # build exe -> dist\rdpguard.e
 - 2 process `rdpguard.exe` = ปกติ (PyInstaller onefile: bootloader + child)
 - `qwinsta`/`query session` ไม่มีใน Win11 บางรุ่น — พาเนล Session fallback เป็น **WTS API (win32ts)** ตรง ๆ ไม่ spawn process ภายนอก (เดิมเคยใช้ PowerShell CIM — ถูกลบเพราะ Norton Behavioral ฟลาก powershell.exe เป็น IDP.HELU.PSE... — ห้ามนำ PowerShell กลับมาโดยไม่คุยก่อน)
 - Windows Firewall คืน RemoteAddresses เป็น `1.2.3.4/255.255.255.255` — ใช้ `_normalize_entry`/`_entry_contains` ใน firewall.py เสมอ
-- เหตุการณ์ "หาย" จากตาราง = UI แสดงแค่ 80 ล่าสุด (ข้อมูลไม่ถูกลบ)
+- เหตุการณ์ "หาย" จากตาราง = UI แสดงแค่ 80 ล่าสุด (ข้อมูลไม่ถูกลบ) · Log แสดง 250/500/1000 บรรทัดและอ่านเฉพาะ 64KB ท้ายไฟล์
 - exe (build ด้วย Python 3.11) รันได้ Windows 8.1+ — Win7 ต้อง build ด้วย Python 3.8
+- ถ้า Telegram ขึ้น `CERTIFICATE_VERIFY_FAILED` จาก HTTPS interception ให้ปิด `telegram_verify_ssl` ในหน้าแจ้งเตือน; ใช้เฉพาะเครือข่ายที่เชื่อถือได้
 
 ## แผนพัฒนา (ถัดไป)
 
-- ตัวนับสะสม IP ที่พยายามแต่ยังไม่ถึงเกณฑ์ (ไล่กลยุทธ์ "ยิงสั้น ๆ แล้วหนี")
-- แจ้งเตือน (email/webhook) เมื่อเจอบล็อก
+- เพิ่ม webhook เป็นช่องทางแจ้งเตือนเพิ่มเติมจาก Telegram/Email
+- เพิ่มตัวกรอง/ค้นหา/ส่งออกเหตุการณ์และ Log ใน Web UI

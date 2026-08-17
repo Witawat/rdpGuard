@@ -2,9 +2,11 @@
 
 Web UI ของ RDPGuard เป็น REST API ง่าย ๆ (JSON) — เปิดเฉพาะ `127.0.0.1:8123` (ค่าเริ่มต้น)
 
-- ทุก endpoint ต้องล็อกอินก่อน ยกเว้น `/api/login-status` และ `/api/login`
+- ทุก endpoint ต้องล็อกอินก่อน ยกเว้น `/api/login-status`, `/api/setup-status`, `/api/login` และ `/api/logout`
 - ล็อกอินแล้วระบบจะให้ cookie `rdpguard_session` — ส่งติดตัวไปทุก request
-- กันเดารหัส: พลาด 5 ครั้ง → ล็อก 5 นาที
+- session มีอายุ 24 ชั่วโมง และต่ออายุอัตโนมัติเมื่อใช้งานต่อเนื่อง
+- กันเดารหัสแยกตาม IP: พลาด 5 ครั้ง → ล็อก 5 นาที (จำกัดรายการ guard สูงสุด 1000 IP)
+- POST ที่ส่ง `Origin` หรือ `Referer` ต้องตรงกับ `Host` เพื่อป้องกัน CSRF; curl ที่ไม่ส่ง header ดังกล่าวยังใช้ได้
 - ตัวอย่างใช้ `curl` (Windows 10+ มีในตัว) — บันทึก cookie ลงไฟล์ `cookies.txt`
 
 ## ล็อกอิน
@@ -36,6 +38,12 @@ curl -s -c cookies.txt -X POST http://127.0.0.1:8123/api/login ^
 ### POST /api/login
 body: `{ "password": "..." }` → คืน `{ "token": "..." }` และ set cookie
 
+### GET /api/setup-status
+สถานะว่า Setup Wizard ทำเสร็จแล้วหรือยัง
+```json
+{ "ok": true, "data": { "setup_done": true } }
+```
+
 ### POST /api/logout
 ออกจากระบบ
 
@@ -45,7 +53,7 @@ body: `{ "password": "..." }` → คืน `{ "token": "..." }` และ set c
 {
   "ok": true,
   "data": {
-    "version": "1.0.0",
+    "version": "1.6.3",
     "context": "service",
     "monitor_running": true,
     "stats": {
@@ -76,7 +84,7 @@ body: `{ "password": "..." }` → คืน `{ "token": "..." }` และ set c
     "source": "auto", "created": "...", "expires": "...", "rule_name": "RDPGuard Block 203.0.113.9" }
 ] } }
 ```
-`source`: `auto` / `manual` / `blacklist` — `expires` ว่าง = ถาวร
+`source`: `auto` / `manual` / `blacklist` / `accumulate` — `expires` ว่าง = ถาวร
 
 ### POST /api/blocked
 บล็อกด้วยมือ — body: `{ "ip": "203.0.113.9", "hours": 24 }` (`hours` 0 = ถาวร, รองรับ CIDR)
@@ -95,9 +103,17 @@ body: `{ "ip": "192.168.1.0/24", "note": "สำนักงาน" }` (รอ�
 ### DELETE /api/whitelist/{ip} / DELETE /api/blacklist/{ip}
 
 ### GET /api/settings
-คืน config ปัจจุบันทั้งไฟล์
+คืน config ปัจจุบันทั้งไฟล์ (ยกเว้นรหัสผ่านจริง — ใช้ `webui.password_hidden` แทน)
 ```json
-{ "ok": true, "data": { "general": { "log_level": "INFO" }, "monitor": { ... }, ... } }
+{ "ok": true, "data": { "general": { "log_level": "INFO", "log_max_mb": "5", "log_backups": "5" }, "monitor": { ... }, "webui": { "password_hidden": "***" }, ... } }
+```
+
+### GET /api/sessions
+คืน session RDP/console/network ที่กำลังใช้งาน — พยายามใช้ `qwinsta`/`query session` และ fallback เป็น WTS API (`win32ts`)
+```json
+{ "ok": true, "data": { "sessions": [
+  { "type": "rdp", "user": "Administrator", "session_id": "2", "state": "Active", "started": "..." }
+] } }
 ```
 
 ### GET /api/service
@@ -122,10 +138,13 @@ body: `{ "ip": "192.168.1.0/24", "note": "สำนักงาน" }` (รอ�
 เปิด/ปิดทันที — body: `{ "key": "enable" }` (เฝ้าระวังทั้งหมด) หรือ `{ "engine": "openssh" }` (engine ตัวเดียว: openssh/mssql/iis/mysql/generic)
 
 ### GET /api/log?lines=250
-log ล่าสุด (max 2000) — `{ "lines": ["..."], "file": "C:\\...\\rdpguard.log" }`
+log ล่าสุด (รับค่า 1–2000; ค่าติดลบจะถูกปรับเป็น 1) — server อ่านเฉพาะ 64 KB ท้ายสุดของไฟล์ปัจจุบัน
+```json
+{ "ok": true, "data": { "lines": ["..."], "file": "C:\\...\\rdpguard.log", "file_size": 47942 } }
+```
 
 ### POST /api/geoip
-หาประเทศของ IP — body: `{ "ips": ["8.8.8.8", ...] }` (max 200 ต่อครั้ง)
+หาประเทศของ IP — body: `{ "ips": ["8.8.8.8", ...] }` (ประมวลผลสูงสุด 20 IP ต่อครั้ง)
 ```json
 { "ok": true, "data": { "geoip": { "8.8.8.8": { "code": "US", "country": "United States", "flag": "🇺🇸" } } } }
 ```
@@ -142,7 +161,7 @@ log ล่าสุด (max 2000) — `{ "lines": ["..."], "file": "C:\\...\\rdp
 ฉุกเฉิน: ปลดบล็อกทุก IP ที่ RDPGuard บล็อกไว้ (ลบ rule firewall + ลบจากตาราง) — `{ "message": "ปลดบล็อกทั้งหมดแล้ว (N IP)" }`
 
 ### POST /api/self-test
-ทดสอบระบบครบวงจร (ต้องรันด้วย admin/service) — เขียน event จำลอง 5 รายการ (Event 18456, `CLIENT: 8.8.8.8`) ลง Application log จริง → รอ engine ตรวจจับ + บล็อก → ตรวจ rule firewall → ปลดบล็อก + ลบ event ทดสอบ
+ทดสอบระบบครบวงจร (ต้องรันด้วย admin/service) — เขียน event จำลองตาม `max_attempts` (ค่าเริ่มต้น 5, Event 18456, `CLIENT: 8.8.8.8`) ลง Application log จริง → รอ engine ตรวจจับ + บล็อก → ตรวจ rule firewall → ปลดบล็อก + ลบ event ทดสอบ
 ```json
 { "ok": true, "data": {
   "working": true,
@@ -150,16 +169,25 @@ log ล่าสุด (max 2000) — `{ "lines": ["..."], "file": "C:\\...\\rdp
   "message": "✅ self-test ผ่านครบวงจร: ..."
 } }
 ```
-- ใช้เวลา ~15-25 วินาที (รอ engine poll + บล็อก)
+- ใช้เวลาไม่เกินประมาณ 25 วินาที (รอ engine poll + บล็อก)
 - ต้องเปิด engine `mssql` อยู่ และ `monitor.enable = true`
+
+### POST /api/notify/test
+ส่งข้อความทดสอบตามช่องทางที่เลือกใน `[notify]` — ต้องมี monitor/notifier กำลังรันอยู่; โหมด `python run.py web` อย่างเดียวจะตอบว่า monitor ไม่ได้รัน
+```json
+{ "ok": true, "data": { "message": "ผลทดสอบแจ้งเตือน", "results": { "telegram": "ok", "email": "ไม่ได้เลือกช่องนี้" } } }
+```
 
 > `/api/overview` มีฟิลด์ `health` ด้วย: `{ is_admin, in_service, can_add_rules, eventlog_ok, firewall_com_ok, engines: {...}, monitor_running }` — ใช้ตรวจสถานะส่วนประกอบสำคัญ
 
 ### POST /api/settings
-บันทึก config — รับเฉพาะ key ที่อนุญาตต่อ section (ดู [CONFIG.md](CONFIG.md)) แล้วมีผลทันที ไม่ต้อง restart
+บันทึก config — รับเฉพาะ key ที่อนุญาตต่อ section (ดู [CONFIG.md](CONFIG.md)) แล้วมีผลทันที ไม่ต้อง restart ยกเว้น `webui.host`/`webui.port` และค่า logging ใน `[general]` ที่ต้อง restart
 ```json
 { "detection": { "max_attempts": "8", "window_minutes": "15" } }
 ```
+
+### POST /api/setup/complete
+ทำเครื่องหมายว่า Setup Wizard เสร็จแล้ว — body `{}` และมีผลทันที
 
 ## ตัวอย่างใช้งานจริง
 
@@ -184,5 +212,6 @@ curl -s -b cookies.txt -X DELETE http://127.0.0.1:8123/api/blocked/203.0.113.9
 | 200 | สำเร็จ |
 | 400 | ข้อมูลไม่ถูกต้อง (เช่น IP รูปแบบผิด) |
 | 401 | ยังไม่ล็อกอิน / รหัสผิด |
+| 403 | ไม่ผ่าน Origin/Referer หรือไม่มีสิทธิ์ควบคุม service/self-test |
 | 404 | ไม่พบเส้นทาง |
 | 429 | ล็อกอินพยายามเกินกำหนด (5 ครั้ง → รอ 5 นาที) |
